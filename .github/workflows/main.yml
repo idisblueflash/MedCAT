@@ -17,14 +17,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+      - name: Set up uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python-version }}
+          enable-cache: true
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          uv sync --group dev
+          # the spaCy model is distributed from GitHub, not PyPI, so it is not
+          # part of the lockfile; install the pinned wheel explicitly.
+          uv pip install "https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.7.1/en_core_web_md-3.7.1-py3-none-any.whl"
+          # put the uv-managed venv on PATH so the remaining steps can call
+          # python/flake8/mypy directly, unchanged.
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Check types
         run: |
           python -m mypy --follow-imports=normal medcat
@@ -88,32 +94,13 @@ jobs:
           ref: 'main'
           fetch-depth: 0
 
-      - name: Set up Python 3.9
-        uses: actions/setup-python@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
         with:
           python-version: 3.9
 
-      - name: Install pypa/build
-        run: >-
-          python -m
-          pip install
-          build
-          --user
-
-      - name: Configure the version
-        run: >-
-          sed --in-place
-          "s/node-and-date/no-local-version/g"
-          setup.py
-
       - name: Build a binary wheel and a source tarball
-        run: >-
-          python -m
-          build
-          --sdist
-          --wheel
-          --outdir dist/
-          .
+        run: uv build --sdist --wheel --out-dir dist/
 
       - name: Publish dev distribution to Test PyPI
         uses: pypa/gh-action-pypi-publish@v1.4.2
