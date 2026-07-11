@@ -1,4 +1,4 @@
-# US 07 De-Identification of Clinical Text
+# US 16 De-Identification of Clinical Text
 
 As a *data engineer*, I want to *detect and redact PII/PHI in clinical free text*, so that *notes can be shared or stored more broadly without exposing patient identifiers*.
 

@@ -1,10 +1,10 @@
-# US 03 Unsupervised Training for Context Vectors and Spell Checking
+# US 10 Unsupervised Training for Context Vectors and Spell Checking
 
 As an *NLP engineer*, I want to *refine concept context vectors and vocabulary statistics from unlabelled text*, so that *linking accuracy and spell-checking improve on my target corpus without any manual annotation*.
 
 `CAT.train(data_iterator)` (`medcat/cat.py:620`) streams raw documents through the pipeline, and for every detected name it updates that CUI's running context vector and the vocabulary's word-frequency counts. Over enough documents, a concept's context vector converges toward the language actually surrounding it in the corpus, and the vocabulary accumulates the frequency statistics used for spell-check suggestions.
 
-Because there is no ground truth to check against, the process relies entirely on volume and frequency: a name seen consistently in a similar context builds a reliable vector, while a rare or noisy occurrence contributes little and is naturally down-weighted rather than treated as authoritative. This self-supervised step is explicitly the precursor to — not a replacement for — supervised correction (US 04).
+Because there is no ground truth to check against, the process relies entirely on volume and frequency: a name seen consistently in a similar context builds a reliable vector, while a rare or noisy occurrence contributes little and is naturally down-weighted rather than treated as authoritative. This self-supervised step is explicitly the precursor to — not a replacement for — supervised correction (US 11).
 
 ## Acceptance Criteria
 

@@ -1,4 +1,4 @@
-# US 05 Meta-Annotation Classification with MetaCAT
+# US 13 Meta-Annotation Classification with MetaCAT
 
 As a *clinical NLP engineer*, I want to *classify contextual attributes (negation, experiencer, temporality) on already-linked spans*, so that *downstream consumers can filter out negated or non-patient mentions without retraining the linker*.
 
@@ -16,7 +16,7 @@ Meta-annotation is deliberately decoupled from the base NER+L decision: a concep
      - then its category values (e.g. Affirmed / Other) are set by config rather than hardcoded
 3. Given a MedCATtrainer JSON export
    - when `prepare_from_json` runs
-     - then training data is prepared in the same format used by supervised training (US 04)
+     - then training data is prepared in the same format used by supervised training (US 11)
 4. Given the publicly distributed `mc_status` model
    - when it runs over an annotation
      - then it classifies whether the annotation is Affirmed (Positive) or Other (Negated/Hypothetical)
