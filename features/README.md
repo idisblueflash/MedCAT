@@ -10,11 +10,11 @@ translate directly into Gherkin scenarios here.
 
 ```
 features/
-├── README.md                 # this file
-├── environment.py            # behave hooks (skips @wip scenarios)
-├── steps/                    # step definitions (Python)
-│   └── ner_linking_steps.py  # steps for the US 01 example
-└── us-01-ner-and-linking.feature
+├── README.md                        # this file
+├── environment.py                   # behave hooks (skips @wip scenarios)
+├── steps/                           # step definitions (Python)
+│   └── annotation_output_steps.py   # steps for the US 09 example
+└── us-09-structured-annotation-output.feature
 ```
 
 - **`*.feature`** — one file per user story, named `us-NN-*.feature` to mirror
@@ -33,7 +33,7 @@ features/
 uv sync --group dev            # installs behave (and the other dev deps)
 uv run behave                  # runs the suite from the repo root
 uv run behave --tags=-wip      # run only implemented (non-WIP) scenarios
-uv run behave features/us-01-ner-and-linking.feature   # a single story
+uv run behave features/us-09-structured-annotation-output.feature   # a single story
 ```
 
 ## Adding a story
@@ -44,6 +44,6 @@ uv run behave features/us-01-ner-and-linking.feature   # a single story
 3. Implement the matching `@given/@when/@then` steps under `steps/`.
 4. Remove the `@wip` tag once the scenarios pass.
 
-The `us-01-ner-and-linking.feature` file is a worked example of steps 1–2 and
-the step stubs in `steps/ner_linking_steps.py` show the intended pattern for
-step 3.
+The `us-09-structured-annotation-output.feature` file is a worked example of
+steps 1–2 and the step stubs in `steps/annotation_output_steps.py` show the
+intended pattern for step 3.
