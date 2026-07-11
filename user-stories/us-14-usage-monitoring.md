@@ -1,23 +1,31 @@
 # US 14 Opt-In Usage Monitoring
 
-This specification describes MedCAT's local, opt-in usage-logging facility, which lets an operator track how a deployed model is actually being used without any data leaving their own infrastructure.
+As an *operator*, I want to *log how a deployed model is actually used, locally and opt-in*, so that *I can track usage without any data leaving my own infrastructure*.
 
-## Core Purpose
+`UsageMonitor` (`medcat/utils/usage_monitoring.py`, configured via `medcat.config.UsageMonitor`) buffers a record of pipeline invocations and periodically flushes them to a per-model log file named with a configurable `file_prefix` and the model's content hash, so logs from different model versions never collide.
 
-`UsageMonitor` (`medcat/utils/usage_monitoring.py`, configured via `medcat.config.UsageMonitor`) buffers a record of pipeline invocations and periodically flushes them to a per-model log file named with a configurable `file_prefix` and the model's content hash, so logs from different model versions never collide in the same file.
+Logging is off by default (`enabled: False`) and, when on, is entirely local: no network call, only writes to a `log_folder` on disk (OS-appropriate defaults such as `~/.local/share/medcat/logs/` on Linux). A third `'auto'` mode lets an operator control logging centrally via the `MEDCAT_USAGE_LOGS` / `MEDCAT_USAGE_LOGS_LOCATION` environment variables rather than editing a config file per deployment — which matters when one model pack is rolled out across many machines.
 
-## Key Design Consideration
+## Acceptance Criteria
 
-Logging is off by default (`enabled: False`) and, when turned on, is entirely local: there is no network call, only writes to a `log_folder` on disk (OS-appropriate defaults such as `~/.local/share/medcat/logs/` on Linux). A third `'auto'` mode additionally lets an operator control logging centrally through the `MEDCAT_USAGE_LOGS` / `MEDCAT_USAGE_LOGS_LOCATION` environment variables rather than editing a config file per deployment, which matters when the same model pack is rolled out across many machines.
+1. Given `enabled=False`
+   - when the pipeline runs
+     - then no logging happens and no overhead is added
+2. Given `enabled=True`
+   - when events accumulate
+     - then they are written to `log_folder` in batches of `batch_size` (default `100`) rather than one disk write per call
+3. Given `enabled='auto'`
+   - when logging is evaluated
+     - then the on/off decision and location defer to `MEDCAT_USAGE_LOGS` / `MEDCAT_USAGE_LOGS_LOCATION`, ignoring the configured `log_folder`
+4. Given an old and a newly retrained model pack
+   - when both write usage logs
+     - then their log filenames incorporate the model hash so the two can be told apart
 
-## Acceptance Criteria Summary
+## Case handling (buffer → batched local flush)
 
-The specification requires:
-- `enabled=False` performs no logging and adds no overhead
-- `enabled=True` writes buffered events to `log_folder` in batches of `batch_size` (default `100`) rather than one disk write per call
-- `enabled='auto'` defers the on/off decision and log location to the `MEDCAT_USAGE_LOGS` / `MEDCAT_USAGE_LOGS_LOCATION` environment variables, ignoring the configured `log_folder` in that mode
-- Log filenames incorporate the model's hash, so usage from an old and a newly retrained model pack can be told apart
+Invocations are buffered and flushed in batches to a hash-named file under the resolved location; the `'auto'` mode swaps config-driven control for environment-driven control without changing the write path. The `UsageMonitor` config class lives at `medcat/config.py:323-344`, exposed on the general config as `config.general.usage_monitor`, and is instantiated with the running model's hash so files self-identify their source model.
 
-## Implementation Notes
+## Later stages (deferred)
 
-The `UsageMonitor` config class lives at `medcat/config.py:323-344` and is exposed on the general config as `config.general.usage_monitor`; the monitor itself is instantiated with the running model's hash so log files self-identify which model produced them.
+- **Log rotation/retention.** Files grow unbounded per model; size/age-based rotation would bound disk use in long-running deployments.
+- **Aggregation tooling.** Logs are raw per-model files; a small reporting utility would summarise usage without bespoke parsing.

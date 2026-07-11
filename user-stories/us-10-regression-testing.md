@@ -1,23 +1,31 @@
 # US 10 Regression Testing Across Model and Ontology Versions
 
-This specification describes how MedCAT verifies that a newly built model pack still behaves acceptably compared to expectations when the underlying ontology (e.g. SNOMED-CT) has moved to a new release.
+As a *model maintainer*, I want to *check a newly built model pack against expected concept results*, so that *I can tell a genuine regression from an expected effect of an ontology (e.g. SNOMED-CT) upgrade before I ship*.
 
-## Core Purpose
+`medcat/utils/regression/regression_checker.py` runs a YAML-defined suite of patient-record templates containing placeholders (e.g. `[FINDING1]`, `[DISORDER]`), each mapped to an expected CUI and name, against a target model pack via `python -m medcat.utils.regression.regression_checker <model pack> [suite yaml]`, and reports how many (sub)cases matched and how many didn't.
 
-`medcat/utils/regression/regression_checker.py` runs a YAML-defined suite of patient-record templates containing placeholders (e.g. `[FINDING1]`, `[FINDING2]`, `[DISORDER]`), each mapped to a specific expected CUI and name, against a target model pack via `python -m medcat.utils.regression.regression_checker <model pack> [suite yaml]`. It reports how many (sub)cases matched expectations and how many didn't.
+Rather than binary pass/fail, results are graded at configurable strictness levels (`IDENTICAL`, `BIGGER_SPAN_LEFT`/`RIGHT`/`BOTH`, `SMALLER_SPAN`, `FOUND_ANY_CHILD`, `FOUND_CHILD_PARTIAL`, `PARTIAL_OVERLAP`, `FAIL`). This distinguishes a real regression from an expected upgrade side effect — a new model correctly linking to a more specific child concept, or shifting a span boundary slightly — which would otherwise drown real failures in noise.
 
-## Key Design Consideration
+## Acceptance Criteria
 
-Rather than a binary pass/fail, results are graded at configurable strictness levels (`IDENTICAL`, `BIGGER_SPAN_LEFT`/`RIGHT`/`BOTH`, `SMALLER_SPAN`, `FOUND_ANY_CHILD`, `FOUND_CHILD_PARTIAL`, `PARTIAL_OVERLAP`, `FAIL`). This distinguishes a genuine regression from an expected side effect of an ontology upgrade — for example, a new model correctly linking to a more specific child concept, or shifting a span boundary slightly — which would otherwise drown real failures in noise.
+1. Given no custom suite is supplied
+   - when the checker runs
+     - then the default suite (`configs/default_regression_tests.yml`) runs out of the box
+2. Given a suite has run against a model pack
+   - when results are reported
+     - then per-case and aggregate counts and percentages are shown at the configured strictness level
+3. Given a (sub)case fails
+   - when results are printed
+     - then the offending phrase, placeholder, expected CUI, and expected name are shown so a developer can triage without a debugger
+4. Given a placeholder with several acceptable resolutions
+   - when the suite is defined
+     - then it can be checked against many candidate names/CUIs, not a single hardcoded expectation
 
-## Acceptance Criteria Summary
+## Case handling (grade-by-strictness)
 
-The specification requires:
-- A default suite (`configs/default_regression_tests.yml`) runs out of the box without requiring a custom YAML
-- Results report per-case and aggregate counts and percentages at the configured strictness level
-- Failing (sub)cases print the offending phrase, placeholder, expected CUI, and expected name so a developer can triage without re-running the suite under a debugger
-- Placeholders can each be checked against many candidate names/CUIs, not just a single hardcoded expectation
+Each placeholder is resolved, the model's output is graded against the expected result at the chosen strictness level, and outcomes are aggregated. Placeholder resolution lives in `targeting.py`, grading in `checking.py`, and aggregation in `results.py`, all under `medcat/utils/regression/`. See `medcat/utils/regression/README.md` for a full walkthrough and example output.
 
-## Implementation Notes
+## Later stages (deferred)
 
-Placeholder resolution lives in `targeting.py`, outcome grading against strictness levels in `checking.py`, and result aggregation in `results.py`, all under `medcat/utils/regression/`. See `medcat/utils/regression/README.md` for the full walkthrough and example output.
+- **CI gating.** The checker reports counts; wiring a strictness/threshold gate into CI would fail a build automatically on real regressions.
+- **Auto-generated suites.** Templates are authored by hand; deriving candidate cases from a trainer export would broaden coverage with less manual effort.

@@ -1,23 +1,31 @@
 # US 07 De-Identification of Clinical Text
 
-This specification describes MedCAT's specialised workflow for detecting and redacting personally identifiable information (PII/PHI) in clinical free text before it is shared or stored more broadly.
+As a *data engineer*, I want to *detect and redact PII/PHI in clinical free text*, so that *notes can be shared or stored more broadly without exposing patient identifiers*.
 
-## Core Purpose
+`DeIdModel` (`medcat/utils/ner/deid.py`) wraps a regular `CAT` pipeline configured with a PII-focused NER component, exposing a simplified API for the two cases that matter: creating a new de-identification model from an NER component (`DeIdModel.create(ner)`) and loading an existing one (`DeIdModel.load_model_pack(path)`). `deid.deid_text(text)` returns anonymised text directly, while `deid(text)` returns the full spaCy `Doc` for callers that need structured spans.
 
-`DeIdModel` (`medcat/utils/ner/deid.py`) wraps a regular `CAT` pipeline configured with a PII-focused NER component, exposing a simplified API for the two use cases that matter here: creating a new de-identification model from an NER component (`DeIdModel.create(ner)`) and loading an existing one for use (`DeIdModel.load_model_pack(path)`). `deid.deid_text(text)` returns anonymised text directly, while `deid(text)` returns the full spaCy `Doc` for callers that need structured entity spans rather than a redacted string.
+The wrapper exists to collapse what would otherwise be manual pipeline assembly (`CAT(cdb=ner.cdb, addl_ner=ner)` plus a separate `deid_text(cat, text)` helper) into one coherent object, while still exposing the underlying `config` and `cdb` for inspection. This keeps de-identification from requiring users to learn CAT's general-purpose construction API just to redact a document.
 
-## Key Design Consideration
+## Acceptance Criteria
 
-The wrapper exists specifically to collapse what would otherwise be manual pipeline assembly (`CAT(cdb=ner.cdb, addl_ner=ner)` followed by a separate `deid_text(cat, text)` helper call) into one coherent object, while still exposing the underlying `config` and `cdb` directly for cases where a caller needs to inspect or adjust the wrapped model. This keeps de-identification from requiring users to understand CAT's general-purpose construction API just to redact a document.
+1. Given a PII-focused NER component
+   - when `DeIdModel.create(ner)` is called
+     - then a working de-identification model is built from it
+2. Given a previously packaged de-identification model pack
+   - when `DeIdModel.load_model_pack(path)` is called
+     - then the model loads ready for use
+3. Given a clinical document
+   - when `deid_text(text)` runs
+     - then anonymised text is returned, suitable for direct storage or sharing
+4. Given a caller needs structured output
+   - when `deid(text)` runs
+     - then a spaCy `Doc` with entity spans and labels is returned for downstream processing
 
-## Acceptance Criteria Summary
+## Case handling (model detection + regex redaction)
 
-The specification requires:
-- `DeIdModel.create` builds a working de-identification model from a supplied NER component
-- `DeIdModel.load_model_pack` loads a previously packaged de-identification model pack
-- `deid_text` returns anonymised text suitable for direct storage or sharing
-- `deid(text)` (structured mode) returns a spaCy `Doc` with entity spans and labels for downstream structured processing
+Detection builds on the transformer-based NER component (`medcat/ner/transformers_ner.py`); the module also imports `re` to support regex-based redaction patterns alongside model-based detection, so structured identifiers can be caught even where the model is uncertain. Redaction has two output modes — replaced text vs. structured `Doc` — selected by which method the caller invokes.
 
-## Implementation Notes
+## Later stages (deferred)
 
-The detection layer builds on the transformer-based NER component (`medcat/ner/transformers_ner.py`), and the module additionally imports `re` to support regex-based redaction patterns alongside model-based detection.
+- **Recall auditing.** There is no built-in leakage/recall report; a held-out PHI evaluation harness would quantify residual risk before release.
+- **Configurable redaction tokens.** Replacement formatting is fixed by the helper; per-entity-type placeholders (e.g. `[NAME]`, `[DATE]`) would aid readability of redacted output.
