@@ -100,23 +100,51 @@ class US01BuildingCDBFromCSVTests(unittest.TestCase):
             reloaded.addl_info["cui2ontologies"]["S-84114007"], {"SNOMED"},
         )
 
-    def test_ac4_malformed_rows_are_reported_not_silently_added(self):
-        # GIVEN one valid row plus rows missing the required cui / name
+    def test_ac4_a_malformed_row_is_reported(self):
+        # GIVEN rows each malformed in one specific way: no cui, no name, or a
+        # name cell that is only separators and so yields no usable name
+        malformed = {
+            "missing cui": pd.DataFrame(
+                {"cui": [""], "name": ["Orphan without a cui"]}),
+            "missing name": pd.DataFrame(
+                {"cui": ["S-22298006"], "name": [""]}),
+            "name is only separators": pd.DataFrame(
+                {"cui": ["S-49436004"], "name": [" | "]}),
+        }
+        for label, df in malformed.items():
+            with self.subTest(label):
+                # WHEN the row is ingested THEN it is reported as malformed
+                with self.assertLogs("medcat.cdb_maker", level=logging.WARNING) as ctx:
+                    self._build(df)
+                self.assertTrue(
+                    any("malformed" in msg.lower() for msg in ctx.output),
+                    "expected a malformed-row warning for %r" % label,
+                )
+
+    def test_ac4_b_malformed_rows_do_not_corrupt_the_cdb(self):
+        # GIVEN one valid row alongside rows missing the required cui / name
         df = pd.DataFrame({
             "cui": ["S-38341003", "", "S-22298006"],
             "name": ["Hypertension", "Orphan without a cui", ""],
         })
 
         # WHEN the rows are ingested
-        with self.assertLogs("medcat.cdb_maker", level=logging.WARNING) as ctx:
-            cdb = self._build(df)
+        cdb = self._build(df)
 
-        # THEN the malformed rows are reported ...
-        self.assertTrue(any("malformed" in msg.lower() for msg in ctx.output))
-        # ... and do not corrupt the CDB: only the valid concept is kept
+        # THEN only the valid concept is kept
         self.assertEqual(list(cdb.cui2names), ["S-38341003"])
         self.assertNotIn("", cdb.cui2names)
         self.assertNotIn("S-22298006", cdb.cui2names)
+
+    def test_ac4_c_missing_name_column_is_reported_not_crashing(self):
+        # GIVEN a file that omits the required name column entirely
+        df = pd.DataFrame({"cui": ["S-73211009"]})
+
+        # WHEN it is ingested THEN every row is reported and none is added,
+        # rather than raising on the absent column
+        with self.assertLogs("medcat.cdb_maker", level=logging.WARNING):
+            cdb = self._build(df)
+        self.assertEqual(cdb.cui2names, {})
 
 
 if __name__ == "__main__":

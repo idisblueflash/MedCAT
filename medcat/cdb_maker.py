@@ -146,9 +146,18 @@ class CDBMaker(object):
                 # This must exist
                 cui = row[col2ind['cui']].strip().upper()
 
-                # Report and skip malformed rows rather than silently adding a
-                # concept with no CUI or no name, which would corrupt the CDB.
-                if not cui or not row[col2ind['name']].strip():
+                # Split the (required) name cell into individual raw names up
+                # front, so a row that yields no usable cui or name can be
+                # reported and skipped rather than silently added as an empty,
+                # corrupt concept. Checking the split result (not the raw cell)
+                # also catches a cell that is only separators, e.g. " | ".
+                if 'name' in col2ind:
+                    raw_names = [raw_name.strip() for raw_name in row[col2ind['name']].split(self.cnf_cm['multi_separator']) if
+                                 len(raw_name.strip()) > 0]
+                else:
+                    raw_names = []
+
+                if not cui or not raw_names:
                     missing = 'cui' if not cui else 'name'
                     logger.warning("Skipping malformed row %s in %s: missing required '%s'",
                                    row_id, csv_path if isinstance(csv_path, str) else '<dataframe>', missing)
@@ -186,8 +195,6 @@ class CDBMaker(object):
                     # We can have multiple versions of a name
                     names: Dict = {} # {'name': {'tokens': [<str>], 'snames': [<str>]}}
 
-                    raw_names = [raw_name.strip() for raw_name in row[col2ind['name']].split(self.cnf_cm['multi_separator']) if
-                                 len(raw_name.strip()) > 0]
                     for raw_name in raw_names:
                         raw_name = raw_name.strip()
                         prepare_name(raw_name, self.pipe.spacy_nlp, names, self.config)
