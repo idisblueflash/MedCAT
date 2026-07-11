@@ -1,7 +1,8 @@
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any, Set, Optional
 
 import os
 import re
+import importlib.metadata
 import pkg_resources
 import platform
 import logging
@@ -12,38 +13,78 @@ logger = logging.getLogger(__name__)
 
 ENV_SNAPSHOT_FILE_NAME = "environment_snapshot.json"
 
-INSTALL_REQUIRES_FILE_PATH = os.path.join(os.path.dirname(__file__),
-                                          "..", "..", "..",
-                                          "install_requires.txt")
-# NOTE: The install_requires.txt file is copied into the wheel during build
-#       so that it can be included in the distributed package.
-#       However, that means it's 1 folder closer to this file since it'll now
-#       be in the root of the package rather than the root of the project.
-INSTALL_REQUIRES_FILE_PATH_PIP = os.path.join(os.path.dirname(__file__),
-                                              "..", "..",
-                                              "install_requires.txt")
+PACKAGE_NAME = "medcat"
+
+
+def _requirement_name(requirement: str) -> str:
+    """Extract the bare distribution name from a PEP 508 requirement string."""
+    # drop any environment marker, then the extras / version specifier
+    requirement = requirement.split(";", 1)[0]
+    return re.split(r"[@<=>~!\[ (]", requirement, 1)[0].strip()
+
+
+def _load_pyproject_toml(path: str) -> Optional[Dict[str, Any]]:
+    """Load a TOML file, or return None if no TOML parser is available."""
+    try:
+        import tomllib  # Python 3.11+
+    except ModuleNotFoundError:
+        try:
+            import tomli as tomllib  # type: ignore
+        except ModuleNotFoundError:
+            return None
+    with open(path, "rb") as f:
+        return tomllib.load(f)
+
+
+def _dependencies_from_pyproject() -> List[str]:
+    """Read [project.dependencies] directly from pyproject.toml.
+
+    Fallback for when MedCAT is run from a source checkout without being
+    installed, so package metadata is unavailable.
+    """
+    pyproject_path = os.path.join(os.path.dirname(__file__),
+                                  "..", "..", "..", "pyproject.toml")
+    if not os.path.exists(pyproject_path):
+        return []
+    data = _load_pyproject_toml(pyproject_path)
+    if data is not None:
+        return data.get("project", {}).get("dependencies", [])
+    # last resort without a TOML library (source checkout on Python 3.9/3.10)
+    with open(pyproject_path) as f:
+        text = f.read()
+    match = re.search(r"(?ms)^\[project\].*?^dependencies\s*=\s*\[(.*?)\]", text)
+    if not match:
+        return []
+    return re.findall(r"""["']([^"']+)["']""", match.group(1))
 
 
 def get_direct_dependencies() -> Set[str]:
     """Get the set of direct dependency names.
 
-    The current implementation reads install_requires.txt for dependenceies,
-    removes comments, whitespace, quotes; removes the versions and returns
-    the names as a set.
+    Reads the installed package metadata (i.e. ``[project.dependencies]`` in
+    pyproject.toml) and returns the dependency names with versions, extras and
+    environment markers stripped. Falls back to reading pyproject.toml directly
+    when MedCAT is run from a source checkout without being installed.
 
     Returns:
         Set[str]: The set of direct dependency names.
     """
-    req_file = INSTALL_REQUIRES_FILE_PATH
-    if not os.path.exists(req_file):
-        # When pip-installed. See note above near constant definition
-        req_file = INSTALL_REQUIRES_FILE_PATH_PIP
-    with open(req_file) as f:
-        # read every line, strip quotes and comments
-        dep_lines = [line.split("#")[0].replace("'", "").replace('"', "").strip() for line in f.readlines()]
-        # remove comment-only (or empty) lines
-        deps = [dep for dep in dep_lines if dep]
-    return set(re.split("[@<=>~]", dep)[0].strip() for dep in deps)
+    try:
+        requirements = importlib.metadata.requires(PACKAGE_NAME)
+    except importlib.metadata.PackageNotFoundError:
+        requirements = None
+    if not requirements:
+        requirements = _dependencies_from_pyproject()
+    names = set()
+    for requirement in requirements:
+        # skip optional-dependency/extra requirements (MedCAT declares none,
+        # but guard against it regardless)
+        if "extra ==" in requirement:
+            continue
+        name = _requirement_name(requirement)
+        if name:
+            names.add(name)
+    return names
 
 
 def _update_installed_dependencies_recursive(

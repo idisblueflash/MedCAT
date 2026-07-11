@@ -30,10 +30,10 @@ features/
 ## Running
 
 ```bash
-pip install -r requirements-dev.txt   # installs behave
-behave                                 # runs the suite from the repo root
-behave --tags=-wip                     # run only implemented (non-WIP) scenarios
-behave features/us-01-ner-and-linking.feature   # a single story
+uv sync --group dev            # installs behave (and the other dev deps)
+uv run behave                  # runs the suite from the repo root
+uv run behave --tags=-wip      # run only implemented (non-WIP) scenarios
+uv run behave features/us-01-ner-and-linking.feature   # a single story
 ```
 
 ## Adding a story

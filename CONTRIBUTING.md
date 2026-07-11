@@ -49,13 +49,16 @@ Some things to remember when suggesting a new feature:
 
 ## Contributing to Code
 
-When making changes to MedCAT, make sure you have the dependencies defined in [requirements-dev](requirements-dev.txt).
+MedCAT uses [uv](https://docs.astral.sh/uv/) to manage the package. When making
+changes, install the project together with its development dependencies with
+`uv sync --group dev` (the dependency groups are declared in
+[pyproject.toml](pyproject.toml)).
 
 Please make sure the code additions are adequately tested and well documented.
 
 Before submitting a pull request, please ensure that the changes satisfy following:
 - The changes are based on the `main` branch (i.e merge the main branch in before submitting a PR)
-- There are no issues with types/mypy (run `python -m mypy --follow-imports=normal medcat` in the project root)
-- There are no issues with flake8 (run `flake8 medcat` in the project root)
-- All tests are successful (run `python -m unittest discover` in the project root)
+- There are no issues with types/mypy (run `uv run mypy --follow-imports=normal medcat` in the project root)
+- There are no issues with flake8 (run `uv run flake8 medcat` in the project root)
+- All tests are successful (run `uv run python -m unittest discover` in the project root)
 
