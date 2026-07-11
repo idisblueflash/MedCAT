@@ -1,4 +1,4 @@
-# US 06 Relation Extraction Between Linked Concepts
+# US 14 Relation Extraction Between Linked Concepts
 
 As an *NLP engineer*, I want to *predict relationships between pairs of already-linked concepts*, so that *I can connect, for example, a finding to the body site it affects rather than storing isolated entities*.
 

@@ -1,4 +1,4 @@
-# US 10 Regression Testing Across Model and Ontology Versions
+# US 21 Regression Testing Across Model and Ontology Versions
 
 As a *model maintainer*, I want to *check a newly built model pack against expected concept results*, so that *I can tell a genuine regression from an expected effect of an ontology (e.g. SNOMED-CT) upgrade before I ship*.
 

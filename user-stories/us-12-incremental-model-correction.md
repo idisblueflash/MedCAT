@@ -1,4 +1,4 @@
-# US 11 Incrementally Correcting a Live Model
+# US 12 Incrementally Correcting a Live Model
 
 As a *clinical curator*, I want to *fix a specific known mistake in a running model*, so that *a missing name, wrong link, or ungrouped concept is corrected immediately without a full retraining pass*.
 

@@ -1,4 +1,4 @@
-# US 02 Building a Concept Database from a CSV
+# US 01 Building a Concept Database from a CSV
 
 As a *knowledge engineer*, I want to *turn a flat list of concepts into a Concept Database (CDB)*, so that *MedCAT's NER+L pipeline can recognise and link the entities I care about*.
 
@@ -23,7 +23,7 @@ The one field worth care is `name_status`: `P` marks a preferred name that shoul
 
 ## Case handling (schema-driven ingest)
 
-Only `cui` and `name` are mandatory; the remaining columns are optional metadata resolved per concept. Example CSVs (`examples/cdb.csv`, `examples/cdb_2.csv`, `examples/complex_cdb.csv`) document the expected schema, and `examples/README.md` describes each column. Serialization defaults to `dill`-based pickling, controllable via the `cdb_format` parameter used when the CDB is later packaged into a model pack (US 08).
+Only `cui` and `name` are mandatory; the remaining columns are optional metadata resolved per concept. Example CSVs (`examples/cdb.csv`, `examples/cdb_2.csv`, `examples/complex_cdb.csv`) document the expected schema, and `examples/README.md` describes each column. Serialization defaults to `dill`-based pickling, controllable via the `cdb_format` parameter used when the CDB is later packaged into a model pack (US 18).
 
 ## Later stages (deferred)
 

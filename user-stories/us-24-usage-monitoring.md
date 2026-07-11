@@ -1,4 +1,4 @@
-# US 14 Opt-In Usage Monitoring
+# US 24 Opt-In Usage Monitoring
 
 As an *operator*, I want to *log how a deployed model is actually used, locally and opt-in*, so that *I can track usage without any data leaving my own infrastructure*.
 
