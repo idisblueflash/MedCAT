@@ -10,12 +10,19 @@ translate directly into Gherkin scenarios here.
 
 ```
 features/
-├── README.md                        # this file
-├── environment.py                   # behave hooks (skips @wip scenarios)
-├── steps/                           # step definitions (Python)
-│   └── annotation_output_steps.py   # steps for the US 09 example
-└── us-09-structured-annotation-output.feature
+├── README.md                          # this file
+├── environment.py                     # behave hooks (skips @wip scenarios)
+├── steps/                             # step definitions (Python)
+│   ├── cdb_from_csv_steps.py          # steps for the US 01 story (implemented)
+│   └── annotation_output_steps.py     # steps for the US 09 example (@wip stubs)
+├── us-01-building-concept-database-from-csv.feature   # implemented, passing
+└── us-09-structured-annotation-output.feature         # @wip
 ```
+
+`us-01-building-concept-database-from-csv.feature` is a fully implemented story:
+its steps drive the real `CDBMaker.prepare_csvs` (no `@wip` tag), so it runs and
+passes under `uv run behave`. `us-09-*` remains a `@wip` worked example of the
+stub-first pattern below.
 
 - **`*.feature`** — one file per user story, named `us-NN-*.feature` to mirror
   `user-stories/us-NN-*.md`. The `Feature:` block reuses the story's
