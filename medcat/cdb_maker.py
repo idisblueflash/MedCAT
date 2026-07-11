@@ -146,6 +146,14 @@ class CDBMaker(object):
                 # This must exist
                 cui = row[col2ind['cui']].strip().upper()
 
+                # Report and skip malformed rows rather than silently adding a
+                # concept with no CUI or no name, which would corrupt the CDB.
+                if not cui or not row[col2ind['name']].strip():
+                    missing = 'cui' if not cui else 'name'
+                    logger.warning("Skipping malformed row %s in %s: missing required '%s'",
+                                   row_id, csv_path if isinstance(csv_path, str) else '<dataframe>', missing)
+                    continue
+
                 if not only_existing_cuis or (only_existing_cuis and cui in self.cdb.cui2names):
                     if 'ontologies' in col2ind:
                         ontologies = set([ontology.strip() for ontology in row[col2ind['ontologies']].upper().split(self.cnf_cm['multi_separator']) if
