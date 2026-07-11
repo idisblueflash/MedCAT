@@ -62,11 +62,14 @@ def _build(context, df, full_build=False):
     Returns:
         CDB: The freshly built CDB, also stored on ``context.cdb``.
     """
+    # Snapshot the logger level before building the maker: CDBMaker.__init__
+    # sets this logger's level from config, so capturing it afterwards would
+    # restore that clobbered value instead of the level we actually found.
+    logger = logging.getLogger("medcat.cdb_maker")
+    previous_level = logger.level
     maker = _maker()
     maker.reset_cdb()
-    logger = logging.getLogger("medcat.cdb_maker")
     collector = _WarningCollector()
-    previous_level = logger.level
     logger.setLevel(logging.WARNING)
     logger.addHandler(collector)
     try:
