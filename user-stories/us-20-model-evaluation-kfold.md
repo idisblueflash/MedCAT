@@ -1,4 +1,4 @@
-# US 13 Model Evaluation via K-Fold Cross-Validation
+# US 20 Model Evaluation via K-Fold Cross-Validation
 
 As an *ML engineer*, I want to *measure per-concept precision/recall/F1 with cross-validation*, so that *I get a variance-aware quality estimate from a trainer export without holding out a separate test set*.
 

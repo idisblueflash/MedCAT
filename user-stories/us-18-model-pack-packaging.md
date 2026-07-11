@@ -1,4 +1,4 @@
-# US 08 Packaging and Loading Portable Model Packs
+# US 18 Packaging and Loading Portable Model Packs
 
 As an *MLOps engineer*, I want to *bundle a configured pipeline into one portable archive and reload it elsewhere*, so that *a model built on one machine deploys identically on another*.
 

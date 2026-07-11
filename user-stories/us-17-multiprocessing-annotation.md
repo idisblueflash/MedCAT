@@ -1,4 +1,4 @@
-# US 09 Large-Scale Multiprocessing Annotation of EHR Corpora
+# US 17 Large-Scale Multiprocessing Annotation of EHR Corpora
 
 As a *data engineer*, I want to *annotate very large document corpora in parallel*, so that *I can scale from a handful of notes to 100M+ documents without exhausting memory*.
 

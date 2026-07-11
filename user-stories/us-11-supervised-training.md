@@ -1,4 +1,4 @@
-# US 04 Supervised Fine-Tuning from Annotated Trainer Exports
+# US 11 Supervised Fine-Tuning from Annotated Trainer Exports
 
 As a *model maintainer*, I want to *feed human-reviewed corrections back into the model*, so that *linking mistakes unsupervised training can't fix are corrected from ground truth*.
 
@@ -27,5 +27,5 @@ Each annotation is dispatched by its correctness flag: correct reinforces, incor
 
 ## Later stages (deferred)
 
-- **Catastrophic-forgetting checks.** There is no automatic guard that supervised passes don't degrade previously correct links; a before/after regression gate (US 10) could be wired in.
+- **Catastrophic-forgetting checks.** There is no automatic guard that supervised passes don't degrade previously correct links; a before/after regression gate (US 21) could be wired in.
 - **Active-learning selection.** Reviewers choose what to correct manually; surfacing the model's least-confident links would target review effort.
