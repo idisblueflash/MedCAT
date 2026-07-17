@@ -1,31 +1,40 @@
 # US 01 Building a Concept Database from a CSV
 
-As a *knowledge engineer*, I want to *turn a flat list of concepts into a Concept Database (CDB)*, so that *MedCAT's NER+L pipeline can recognise and link the entities I care about*.
+As a *knowledge engineer*, I want to *turn a simple list of medical concepts into a Concept Database (CDB)*, so that *MedCAT can find and link the concepts I care about inside text*.
 
-`CDBMaker.prepare_csvs` (`medcat/cdb_maker.py`) ingests one or more CSV files where each row provides a `cui` and a `name`, optionally alongside `ontologies`, `name_status`, `type_ids`, and `description`. A concept with multiple synonyms appears as multiple rows sharing the same `cui`, which the maker merges into a single `CDB` entry with all known names attached.
+A Concept Database (CDB) is a lookup table. It tells MedCAT which words in a document point to which medical concept.
 
-The one field worth care is `name_status`: `P` marks a preferred name that should resolve to this concept in the large majority of occurrences, `N` forces the name through disambiguation, and `A` lets MedCAT decide from training data. Getting it wrong for a few rows has little impact, so the format tolerates it being omitted or approximate rather than requiring it exhaustively correct up front.
+You give MedCAT this list as one or more CSV files (a CSV is a spreadsheet saved as plain text). Each row needs two things: a `cui` (a unique code number for the concept) and a `name` (a word or phrase people actually use for it). You can also add extra columns if you have them: `ontologies` (which vocabulary the concept comes from), `name_status`, `type_ids`, and `description`.
+
+Many concepts have more than one name — these are called synonyms. If a concept has several names, just add several rows that share the same `cui`. The tool that reads the CSV, `CDBMaker.prepare_csvs` (in `medcat/cdb_maker.py`), joins those rows together into one entry in the CDB, keeping every name.
+
+One column deserves extra care: `name_status`. It tells MedCAT how much to trust a name:
+- `P` (preferred) — this name almost always means this concept.
+- `N` (not preferred) — the name is ambiguous, so MedCAT should think harder before deciding what it means.
+- `A` (automatic) — let MedCAT decide later, from training data.
+
+Don't worry about getting `name_status` perfect on every row. A few mistakes here have little effect, so it's fine to leave it out or guess.
 
 ## Acceptance Criteria
 
-1. Given several CSV rows sharing one `cui`
+1. Given several CSV rows that share the same `cui`
    - when `prepare_csvs` builds the CDB
-     - then they are merged into a single concept with every name retained
-2. Given a CSV that supplies only `cui` and `name`
+     - then all those rows are merged into one concept, keeping every name
+2. Given a CSV that only fills in the `cui` and `name` columns
    - when the CDB is built
-     - then it succeeds — all other columns are optional and may appear on just one row per concept to keep files small
-3. Given a built CDB
-   - when it is saved with `CDB.save` and reloaded with `CDB.load`
-     - then names, ontology tags, and type IDs survive the round trip unchanged
-4. Given malformed or duplicate rows
-   - when the CSV is ingested
-     - then they are reported rather than silently corrupting the resulting CDB
+     - then it still works — every other column is optional, so files can stay small
+3. Given a CDB that has already been built
+   - when it is saved with `CDB.save` and loaded again with `CDB.load`
+     - then the names, ontology tags, and type IDs come back exactly as they were
+4. Given a CSV with broken or duplicate rows
+   - when the file is read
+     - then MedCAT reports the problem rows instead of quietly building a broken CDB
 
-## Case handling (schema-driven ingest)
+## Case handling (which columns you need)
 
-Only `cui` and `name` are mandatory; the remaining columns are optional metadata resolved per concept. Example CSVs (`examples/cdb.csv`, `examples/cdb_2.csv`, `examples/complex_cdb.csv`) document the expected schema, and `examples/README.md` describes each column. Serialization defaults to `dill`-based pickling, controllable via the `cdb_format` parameter used when the CDB is later packaged into a model pack (US 18).
+Only `cui` and `name` are required. Everything else is optional information MedCAT can fill in per concept. Look at the example CSV files (`examples/cdb.csv`, `examples/cdb_2.csv`, `examples/complex_cdb.csv`) to see the expected columns, and read `examples/README.md` for what each column means. By default MedCAT saves the CDB using a Python tool called `dill` (a more powerful version of `pickle`); you can change this with the `cdb_format` setting, which also matters later when everything is packaged into a model pack (US 18).
 
 ## Later stages (deferred)
 
-- **Validation reporting.** Row-level diagnostics could be richer (line numbers, offending values) to speed up fixing large source files.
-- **Schema versioning.** The CSV column set is conventional rather than versioned; a declared schema version would ease migration as new fields are added.
+- **Better error messages.** The tool could say more about exactly which row and value caused a problem, to help fix large files faster.
+- **A versioned schema.** The set of CSV columns is a convention, not a strict version number. A declared schema version would make it easier to update the format later without breaking old files.

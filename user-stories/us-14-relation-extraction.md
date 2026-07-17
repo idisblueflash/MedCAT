@@ -1,31 +1,31 @@
 # US 14 Relation Extraction Between Linked Concepts
 
-As an *NLP engineer*, I want to *predict relationships between pairs of already-linked concepts*, so that *I can connect, for example, a finding to the body site it affects rather than storing isolated entities*.
+As an *NLP engineer*, I want to *predict how two already-linked concepts relate to each other*, so that *I can connect, for example, a finding to the body part it affects, instead of storing separate, disconnected entities*.
 
-`RelCAT` (`medcat/rel_cat.py`) trains and runs a transformer-based classifier over candidate pairs of linked entity spans within a document, predicting whether — and what kind of — relation connects them. It supports multiple transformer backbones through `medcat/utils/relation_extraction/`.
+`RelCAT` (`medcat/rel_cat.py`) trains and runs a transformer-based classifier over pairs of already-linked entity spans in a document. For each pair, it predicts whether they're related, and if so, what kind of relation connects them. It supports several different transformer models through `medcat/utils/relation_extraction/`.
 
-RelCAT operates strictly downstream of NER+L: it draws candidate pairs from CDB-linked spans rather than re-detecting entities, so relation quality is bounded by the upstream linking. Because relation classes in clinical text are heavily imbalanced (most pairs are unrelated), training uses `compute_class_weight` and a class-aware split (`split_list_train_test_by_class`) rather than a naive random split.
+RelCAT only runs *after* concept recognition and linking are done — it picks candidate pairs from concepts the CDB has already linked (US 05–07), rather than detecting entities itself. That means how good the relations are depends directly on how good the earlier linking was. Also, in real clinical text, most possible pairs of concepts are *not* related to each other — relation types are heavily imbalanced. To handle that, training uses `compute_class_weight` (to give rarer relation types more weight) and a class-aware split (`split_list_train_test_by_class`), instead of splitting the data purely at random.
 
 ## Acceptance Criteria
 
-1. Given a document already processed by the NER+L pipeline
-   - when RelCAT selects candidates
-     - then candidate pairs are drawn from the existing linked spans, not re-detected
-2. Given a training set where most pairs are unrelated
+1. Given a document already processed by the concept-recognition-and-linking pipeline
+   - when RelCAT selects candidate pairs
+     - then it picks them from the already-linked spans — it does not detect any new entities itself
+2. Given a training set where most pairs have no relation
    - when RelCAT trains
-     - then class imbalance is compensated for via computed class weights
-3. Given the training set is split into train/test
-   - when the split is made
-     - then relation-class proportions are preserved rather than split purely at random
-4. Given a trained RelCAT
-   - when `save_state` / `save_results` then `load_state` / `load_results` are called
-     - then training state and results round-trip so a run can resume or be evaluated later
+     - then that imbalance is compensated for using computed class weights
+3. Given the training data is split into a train set and a test set
+   - when the split happens
+     - then the proportion of each relation type is preserved in both sets, rather than splitting purely at random
+4. Given a RelCAT model has already been trained
+   - when `save_state` / `save_results` are called, followed later by `load_state` / `load_results`
+     - then the training progress and results come back exactly as they were, so a run can be resumed or evaluated later
 
-## Case handling (pairwise classification over linked spans)
+## Case handling (classify every pair of linked spans)
 
-The candidate pool is the set of linked-entity pairs in a document; each pair is classified into a relation type or "no relation". Configuration lives in `medcat/config_rel_cat.py`; model-specific components under `medcat/utils/relation_extraction/`. Coverage lives in `tests/test_rel_cat.py`.
+The pool of candidates is every pair of already-linked entities found in a document; each pair gets classified as one relation type, or as "no relation." Settings live in `medcat/config_rel_cat.py`; model-specific pieces live under `medcat/utils/relation_extraction/`. Tests live in `tests/test_rel_cat.py`.
 
 ## Later stages (deferred)
 
-- **Candidate pruning.** All in-document pairs are considered; distance- or type-based pruning would cut the quadratic candidate count on long notes.
-- **Cross-sentence relations.** Focus is within-document pairs; explicit handling of long-range or cross-section relations is left open.
+- **No pruning of candidate pairs.** Every possible pair within a document is currently considered, which grows quickly for long notes. Filtering pairs by distance or concept type could cut this down.
+- **No explicit handling of long-distance relations.** The current focus is on pairs within the same document; relations that span across sentences or sections aren't specifically handled yet.

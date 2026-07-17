@@ -1,40 +1,49 @@
 # US 19 Measuring Performance Against a Gold Standard
 
-As a *model builder deciding whether to deploy*, I want to *know the precision, recall, and F1 per concept, with worked examples of the model's mistakes*, so that *I can judge whether it is good enough — and see which concepts it is bad at, because an aggregate F1 hides everything that matters*.
+As a *model builder deciding whether to deploy*, I want to *know the precision, recall, and F1 score for each concept, along with worked examples of the model's mistakes*, so that *I can judge whether the model is good enough, and see exactly which concepts it struggles with — because one overall F1 score hides all the details that actually matter*.
 
-`get_stats(cat, data)` (`medcat/stats/stats.py:272`) replays a MedCATtrainer export: it annotates each document with the model, compares against the human annotations, and accumulates true positives, false positives, and false negatives **per CUI**. From those it derives per-concept precision, recall, and F1, plus `cui_counts`, plus — the part that earns its keep — `examples`, a dict of actual FP and FN sentences per concept. A recall of 0.6 is not actionable; twenty false-negative sentences for that CUI tell you the model is missing an abbreviation.
+(A "gold standard" is a set of documents where the correct annotations are already known, usually because a human checked them. Precision, recall, and F1 are standard ways of measuring how good predictions are: precision asks "of what it found, how much was right?"; recall asks "of what was actually there, how much did it find?"; F1 combines both into one number.)
 
-The risks are all in what counts as a match, and each is a switch. `use_overlaps` (`:24`) decides whether an overlapping-but-not-identical span counts. `use_cui_doc_limit` (`:25`) restricts a CUI's metrics to documents where that CUI was actually annotated — which matters enormously if the annotation schema changed mid-project, since otherwise every document annotated before the concept was added contributes false positives. `use_groups` reports on concept *groups* rather than CUIs, which makes numbers look better by forgiving within-group confusions. And `use_filters` applies the project's own CUI filter (US 08). None of these are recorded alongside the result: two F1 numbers from this function are not comparable unless you know all four settings.
+`get_stats(cat, data)` (`medcat/stats/stats.py:272`) replays a MedCATtrainer export: it runs the model on each document, compares the result to the human annotations, and keeps a running tally of true positives, false positives, and false negatives **for each individual concept**. From that, it works out precision, recall, and F1 per concept, plus `cui_counts`, plus the most useful part: `examples` — a dictionary of the actual sentences where the model got a false positive or false negative for each concept. A recall score of 0.6 on its own doesn't tell you what to fix; twenty example sentences of missed mentions for that concept will show you it's missing a specific abbreviation.
+
+The tricky part is deciding what even counts as "a match," and there are four separate settings that each change the answer:
+
+- `use_overlaps` (`:24`) — decides whether a span that overlaps the gold answer, but isn't identical to it, counts as correct.
+- `use_cui_doc_limit` (`:25`) — restricts a concept's score to only the documents where that concept was actually annotated in the gold data. This matters a lot if your annotation guidelines changed partway through the project — otherwise, every document annotated before a concept was added counts as a false positive.
+- `use_groups` — reports scores by concept *group* instead of individual concept, which makes the numbers look better because mix-ups within the same group are no longer counted as errors.
+- `use_filters` — applies the project's own concept filter (US 08), so concepts outside the project's scope aren't scored at all.
+
+None of these four settings are recorded together with the result. This means two F1 scores from this function are only comparable if you already know all four settings were the same both times.
 
 ## Acceptance Criteria
 
 1. Given a model and a gold-standard export
    - when `get_stats` runs
-     - then per-CUI `tp`, `fp`, `fn`, `precision`, `recall`, `f1`, and `cui_counts` are returned, along with FP/FN example sentences per concept
-2. Given a model prediction overlapping a gold span but not matching it exactly, and `use_overlaps=False` (the default)
+     - then per-concept `tp`, `fp`, `fn`, `precision`, `recall`, `f1`, and `cui_counts` are returned, along with example sentences for false positives and false negatives
+2. Given a model's prediction overlaps a gold answer but isn't an exact match, and `use_overlaps=False` (the default)
    - when scoring runs
-     - then it counts as both a false positive and a false negative — the harshest reading
+     - then it is counted as both a false positive *and* a false negative — the strictest possible reading
 3. Given `use_cui_doc_limit=True`
    - when scoring runs
-     - then a CUI's metrics only count documents in which that CUI appears in the gold annotations, suppressing false positives from documents annotated before the concept entered the schema
+     - then a concept's score only counts documents where that concept actually appears in the gold annotations, avoiding false positives from documents annotated before that concept existed in the schema
 4. Given `use_groups=True`
    - when scoring runs
-     - then concepts are collapsed into their `cui2group` and metrics reported per group — confusions within a group stop being errors
+     - then concepts are grouped together using `cui2group`, and scores are reported per group — so mix-ups within the same group no longer count as mistakes
 5. Given `use_filters=True`
    - when scoring runs
-     - then the project's own CUI filter is applied, so concepts outside the project's scope are not scored against it
-6. Given an annotation marked `irrelevant` or `deleted` in the export
+     - then the project's own concept filter is applied, so concepts outside the project's scope aren't scored
+6. Given an annotation in the export is marked `irrelevant` or `deleted`
    - when scoring runs
-     - then it is handled separately rather than being scored as a positive
-7. Given `train_supervised_raw(..., print_stats=N, test_size=0)`
+     - then it is handled separately, rather than counted as a correct positive
+7. Given `train_supervised_raw(..., print_stats=N, test_size=0)` is used
    - when these statistics are printed
-     - then they are computed against the training set, because `test_size=0` makes the test set and train set the same object (US 12)
+     - then they are actually measured against the training set, because `test_size=0` makes the "test set" and the training set the same data (see US 12)
 
-## Case handling (per-CUI tally, four switches on what counts)
+## Case handling (per-concept tally, with four adjustable rules)
 
-Every prediction is classified against the gold set as TP, FP, or FN and tallied per concept. The classification rule is not fixed — it is parameterised by four flags that each move the number, sometimes substantially, and the returned tuple carries no record of which were set. This is the same stats machinery k-fold evaluation reuses (US 20), which is what makes single-pass and k-fold numbers directly comparable. Coverage lives under `tests/stats/`.
+Every prediction is classified against the gold data as a true positive, false positive, or false negative, and tallied separately per concept. The classification rule itself isn't fixed — it depends on the four settings above, each of which can shift the numbers noticeably, and the result returned doesn't record which settings were used. This is the same scoring logic reused by k-fold evaluation (US 20), which is what makes single-pass results and k-fold results comparable to each other. Tests live under `tests/stats/`.
 
 ## Later stages (deferred)
 
-- **Metrics are unlabelled.** The output is a bare tuple of dicts; attaching the evaluation settings (and the model hash) to the result would make reported numbers reproducible and comparable.
-- **No confidence-threshold sweep.** Precision and recall are reported at whatever `similarity_threshold` happens to be configured; a PR curve over that threshold is the natural thing to want and is not produced.
+- **Results don't record their own settings.** The output is just a plain set of dictionaries; attaching the evaluation settings (and the model's version hash) to the result would make reported numbers easier to reproduce and compare.
+- **No precision/recall curve.** Precision and recall are reported at whatever `similarity_threshold` happens to be set at the time. Showing how these numbers change across different thresholds (a PR curve) would be a natural next step, but isn't done yet.

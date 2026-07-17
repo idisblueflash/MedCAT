@@ -1,31 +1,33 @@
 # US 10 Unsupervised Training for Context Vectors and Spell Checking
 
-As an *NLP engineer*, I want to *refine concept context vectors and vocabulary statistics from unlabelled text*, so that *linking accuracy and spell-checking improve on my target corpus without any manual annotation*.
+As an *NLP engineer*, I want to *improve concept context vectors and vocabulary statistics using plain, unlabelled text*, so that *linking accuracy and spell-checking get better for my own data, without anyone having to hand-annotate anything*.
 
-`CAT.train(data_iterator)` (`medcat/cat.py:620`) streams raw documents through the pipeline, and for every detected name it updates that CUI's running context vector and the vocabulary's word-frequency counts. Over enough documents, a concept's context vector converges toward the language actually surrounding it in the corpus, and the vocabulary accumulates the frequency statistics used for spell-check suggestions.
+"Unsupervised" here means: no one has told MedCAT the right answers — it just learns patterns from raw text on its own.
 
-Because there is no ground truth to check against, the process relies entirely on volume and frequency: a name seen consistently in a similar context builds a reliable vector, while a rare or noisy occurrence contributes little and is naturally down-weighted rather than treated as authoritative. This self-supervised step is explicitly the precursor to — not a replacement for — supervised correction (US 11).
+`CAT.train(data_iterator)` (`medcat/cat.py:620`) feeds plain documents through the pipeline one by one. Every time it detects a concept name, it updates two things: the running context vector for that concept (see US 06), and the word-frequency counts in the vocabulary (see US 03). After enough documents, a concept's context vector starts to reflect the actual language that tends to surround it in your data, and the vocabulary builds up the frequency statistics that spell-checking later relies on.
+
+Since there's no "correct answer" to check against here, this process depends entirely on how often and how consistently something appears. A name that keeps showing up in similar surroundings ends up with a reliable vector; a name that appears rarely, or in unusual contexts, contributes very little and naturally carries less weight — it isn't treated as if it were certainly correct. This step is meant to come *before* supervised correction (US 11), not replace it.
 
 ## Acceptance Criteria
 
-1. Given a corpus of unlabelled documents
+1. Given a corpus of documents with no labels
    - when `cat.train` runs over it
-     - then context vectors are updated with no annotation input required
-2. Given training has processed documents
-   - when preprocessing later runs the spell-checker
-     - then it draws on the word-frequency counts accumulated during training
+     - then context vectors get updated with no manual annotation needed at all
+2. Given training has already processed some documents
+   - when the spell-checker runs later during preprocessing
+     - then it uses the word-frequency counts built up during that training
 3. Given a small test corpus
-   - when `unigram_table_size` (default `100000000`) is lowered
-     - then negative sampling uses a smaller table instead of forcing a production-scale allocation
-4. Given a model already trained on some data
-   - when `cat.train` runs again on additional data
-     - then previously learned vectors are retained rather than discarded
+   - when `unigram_table_size` (100,000,000 by default) is set lower
+     - then negative sampling uses a smaller table instead of forcing a huge, production-scale one
+4. Given a model that has already been trained on some data
+   - when `cat.train` runs again on more data
+     - then what it already learned is kept, not thrown away
 
-## Case handling (frequency-driven updates)
+## Case handling (learning by frequency, not by rule)
 
-Each detected name contributes a context-vector update and a vocabulary count; nothing is treated as authoritative from a single occurrence. Vocabulary construction and word-frequency accumulation live in `medcat/utils/make_vocab.py` and `medcat/vocab.py`; the `Vocab` produced here is the same one consumed by `medcat/preprocessing/normalizers.py` for spell-check suggestions during subsequent annotation.
+Every detected name adds one small update to its context vector and to the vocabulary's word count — no single occurrence is treated as definitely correct on its own. Building the vocabulary and counting word frequency happens in `medcat/utils/make_vocab.py` and `medcat/vocab.py`. The same `Vocab` object built here is later used by `medcat/preprocessing/normalizers.py` to suggest spelling corrections during annotation.
 
 ## Later stages (deferred)
 
-- **Convergence signals.** Training exposes no built-in "vectors have stabilised" metric; a convergence/early-stop indicator would help size corpora.
-- **Noise down-weighting.** Rare-context handling is implicit in the frequency model; an explicit outlier filter could further reduce noisy updates.
+- **No sign of "done learning."** Training doesn't currently tell you when the vectors have settled down and stopped changing much; a built-in signal for this would help decide how much data is enough.
+- **No explicit noise filter.** Rare or unusual contexts are only down-weighted indirectly, through frequency. An explicit filter for outliers could reduce noisy updates further.

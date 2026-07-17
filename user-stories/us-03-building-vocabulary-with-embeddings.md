@@ -1,34 +1,40 @@
 # US 03 Building a Vocabulary with Word Embeddings
 
-As a *model builder*, I want to *build a vocabulary of words, counts, and embedding vectors from a text corpus*, so that *the linker can represent the context around a mention as a vector and the spell-checker knows what a real word looks like*.
+As a *model builder*, I want to *build a vocabulary of words, word counts, and embedding vectors from a text corpus*, so that *the linker can turn the words around a mention into a vector, and the spell-checker knows what a real word looks like*.
 
-`MakeVocab` (`medcat/utils/make_vocab.py:15`) scans a corpus, counts every token via `make` (`:64`, optionally folding in the CDB's own name tokens with `join_cdb=True`), and then `add_vectors` (`:123`) attaches an embedding vector per word. The resulting `Vocab` (`medcat/vocab.py`) also maintains a frequency-weighted unigram table (`make_unigram_table`, `:179`) from which `get_negative_samples` (`:216`) draws during training (US 10). The CDB (US 01) knows names; it knows nothing about *language* — the `Vocab` is what supplies it.
+An "embedding vector" is just a list of numbers that represents a word's meaning, so that similar words end up with similar numbers.
 
-The dependency is load-bearing and easy to miss: disambiguation (US 06) averages the embedding vectors of the words surrounding a mention and compares that to a per-concept learned vector, so without a `Vocab` there is no context, no similarity, and `CAT._create_pipeline` silently builds a pipeline with **no dictionary NER and no linker at all** (both are added only `if self.vocab is not None`). The failure is asymmetric, too: a word absent from the vocab contributes *nothing* to the context vector — it is skipped, not zeroed, not flagged — so a mention surrounded entirely by out-of-vocabulary words gets an empty context vector and becomes effectively unlinkable. It looks like a recall problem in the recogniser; it is actually a vocabulary hole.
+`MakeVocab` (`medcat/utils/make_vocab.py:15`) reads a large body of text (a "corpus") and counts every word with its `make` method (`:64`; it can also mix in the CDB's own concept names with `join_cdb=True`). Then `add_vectors` (`:123`) attaches an embedding vector to each word. The result is a `Vocab` object (`medcat/vocab.py`), which also keeps a table of word frequencies (`make_unigram_table`, `:179`). Training later draws random "negative" words from that table via `get_negative_samples` (`:216`) — see US 10.
+
+Here's the key idea: the CDB (US 01) only knows concept *names*. It knows nothing about ordinary *language*. The `Vocab` is what supplies that missing knowledge.
+
+This dependency matters more than it looks, and it's easy to miss. Disambiguation (US 06) works by averaging the embedding vectors of the words around a mention, then comparing that average to a vector learned for each concept. Without a `Vocab`, there is no context vector and no comparison — in fact `CAT._create_pipeline` silently builds a pipeline with **no dictionary matcher and no linker at all**, because both are only added `if self.vocab is not None`.
+
+There's also a hidden failure mode. A word that's missing from the vocabulary doesn't count as "zero" in the context vector — it's simply skipped, without any warning. So if every word around a mention happens to be missing from the vocabulary, the context vector ends up empty and the mention can't be linked at all. From the outside this looks like the recogniser missed something; really, it's a gap in the vocabulary.
 
 ## Acceptance Criteria
 
-1. Given a corpus iterator
-   - when `make` builds the vocab
-     - then every token receives a count, and `remove_words_below_cnt(n)` (`medcat/vocab.py:55`) can prune the long tail — pruning also drops that word's vector
-2. Given `add_vectors` with an embedding source
-   - when it runs
-     - then each known word gains a vector, while words counted without a vector still serve spell-checking but contribute nothing to context vectors
-3. Given a token encountered at annotation time that is not in the vocab
+1. Given a corpus to read
+   - when `make` builds the vocabulary
+     - then every word gets a count, and `remove_words_below_cnt(n)` (`medcat/vocab.py:55`) can drop rare words — dropping a word also removes its vector
+2. Given `add_vectors` is run with a source of embeddings
+   - when it finishes
+     - then every known word gets a vector; words that were only counted (no vector) still help spell-checking, but add nothing to context vectors
+3. Given a word seen while annotating a document that isn't in the vocabulary
    - when the context vector is averaged
-     - then it is skipped entirely — it does not contribute a zero vector, it contributes nothing
-4. Given a mention where every surrounding token is out-of-vocabulary
+     - then that word is skipped completely — it does not add a zero, it adds nothing at all
+4. Given a mention where every surrounding word is missing from the vocabulary
    - when linking runs
-     - then the context vector is absent, similarity cannot be scored, and the candidate is effectively unlinkable
-5. Given negative sampling is requested during training
+     - then there is no context vector, so nothing can be compared, and the mention effectively cannot be linked
+5. Given training asks for negative samples
    - when `get_negative_samples` runs
-     - then it draws from the frequency-weighted unigram table, optionally ignoring punctuation and numbers
+     - then it picks words from the frequency-weighted table, optionally skipping punctuation and numbers
 
-## Case handling (present / present-without-vector / absent)
+## Case handling (three situations for any given word)
 
-A word is in the vocab with a vector (contributes to context), in the vocab without one (contributes to spell-check only), or absent (contributes nothing). Only the first two are handled explicitly; the third degrades silently, which is exactly why vocabulary coverage has to be verified before blaming the linker. Coverage lives in `tests/test_vocab.py`.
+A word can be: in the vocabulary with a vector (helps with context), in the vocabulary without a vector (helps with spell-checking only), or missing entirely (helps with nothing). Only the first two are handled on purpose — the third one fails silently, which is exactly why it's worth checking your vocabulary's coverage before assuming the linker itself is broken. Tests for this live in `tests/test_vocab.py`.
 
 ## Later stages (deferred)
 
-- **No coverage report.** Nothing measures what fraction of a corpus's tokens actually resolved to a vector — arguably the single best predictor of linking quality — so a vocabulary hole cannot be quantified up front.
-- **Vocab and CDB drift.** `join_cdb=True` folds CDB name-tokens into the vocab at build time; concepts added later (US 12) are not reflected, and the vocab silently falls behind the CDB.
+- **No coverage report.** Nothing currently measures what fraction of a corpus's words actually got a vector — probably the single best early warning sign for linking quality — so a vocabulary gap is hard to spot ahead of time.
+- **Vocab and CDB can drift apart.** `join_cdb=True` only mixes CDB names into the vocabulary at build time. Concepts added later (US 12) are not reflected, and the vocabulary quietly falls behind the CDB.

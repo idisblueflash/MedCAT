@@ -1,37 +1,39 @@
 # US 07 Resolving Overlapping Detections into One Annotation Set
 
-As a *clinician analysing free-text notes*, I want to *get "diabetes mellitus type 2" as one annotation rather than three overlapping ones*, so that *each piece of text carries a single meaning and downstream counting does not double-count*.
+As a *clinician analysing free-text notes*, I want to *get "diabetes mellitus type 2" as one single annotation, not three overlapping ones*, so that *each piece of text carries one clear meaning, and any later counting doesn't count the same thing twice*.
 
-Candidate detection over-produces by design: a greedy prefix walk emits every complete name it passes through, so nested and overlapping spans are normal, not exceptional. Disambiguation (US 06) then drops the ones that fail. What survives still overlaps, and `create_main_ann` (`medcat/utils/postprocessing.py:37`) is the arbiter. Its rule is entirely mechanical: sort the surviving entities by **text length, longest first**, then walk them, accepting an entity only if *none* of its tokens has already been claimed. Longest match wins; everything it covers is suppressed.
+Finding candidates (US 05) is designed to find too many, on purpose: it walks through the text and records every complete name it passes, so spans that overlap or sit inside one another are completely normal, not a bug. Disambiguation (US 06) then removes candidates that fail its checks. But whatever is left can still overlap — and that's what this step fixes.
 
-The risk is that "longest" is a proxy for "most specific", and the proxy is not always right. Length is measured in characters of surface text — not specificity, not confidence, not similarity — so a long, low-confidence match beats a short, high-confidence one it happens to overlap, and the context similarity computed at such cost in US 06 plays no part in this decision. The full, un-arbitrated set is not discarded (it stays on `doc._.ents`, and `general.show_nested_entities`, `medcat/config.py:378`, will surface it), but the default output is the arbitrated one.
+`create_main_ann` (`medcat/utils/postprocessing.py:37`) is the referee. Its rule is simple and mechanical: sort all the surviving matches by **text length, longest first**, then go through them one by one, keeping a match only if *none* of its words have already been claimed by a longer match that came before it. The longest match wins, and everything underneath it is thrown out.
+
+Here's the catch: "longest" is being used as a stand-in for "most specific," and that stand-in isn't always right. Length is measured purely in characters of text — it says nothing about how confident the match was, or how well its context matched. So a long match with low confidence can beat a short match with high confidence, simply because they overlap, and the careful context-similarity work from US 06 plays no role in this decision at all. The full, unfiltered set of matches isn't thrown away completely — it stays available on `doc._.ents`, and turning on `general.show_nested_entities` (`medcat/config.py:378`) will show it — but by default, only the filtered set is returned.
 
 ## Acceptance Criteria
 
-1. Given two surviving entities where one's span strictly contains the other's
+1. Given two surviving matches, where one's span completely contains the other's
    - when `create_main_ann` runs
-     - then the longer one is kept and the shorter is suppressed from `doc.ents`
-2. Given two entities that partially overlap by at least one token
+     - then the longer one is kept, and the shorter one is removed from `doc.ents`
+2. Given two matches that overlap by at least one shared word
+   - when the arbitration runs
+     - then the longer one wins, and the other is dropped completely — not shortened, not merged, just dropped
+3. Given two overlapping matches of exactly the same length
    - when arbitration runs
-     - then the longer text wins and the other is dropped entirely — not truncated, not merged
-3. Given two overlapping entities of equal text length
+     - then whichever one comes first in the sorted order wins — this tie-break has no deeper reasoning behind it
+4. Given matches that don't overlap at all
    - when arbitration runs
-     - then the one encountered first in sorted order wins; the tie-break is incidental, not principled
-4. Given entities that do not overlap at all
+     - then all of them are kept, in the order the sort produced
+5. Given `general.show_nested_entities` is turned on
+   - when the output is built (US 09)
+     - then it comes from `doc._.ents` — the complete, unfiltered set including overlaps — instead of the filtered `doc.ents`
+6. Given a short match with 0.9 context similarity overlaps a longer match with only 0.3
    - when arbitration runs
-     - then all are kept, in the order the sort produced
-5. Given `general.show_nested_entities` is enabled
-   - when output is built (US 09)
-     - then it is drawn from `doc._.ents` — the full pre-arbitration set, overlaps included — rather than from the arbitrated `doc.ents`
-6. Given a context similarity of 0.9 on a short entity and 0.3 on a longer overlapping one
-   - when arbitration runs
-     - then the longer one still wins — similarity is not consulted here
+     - then the longer one still wins — similarity is not looked at during this step at all
 
-## Case handling (sort by length, first-claim-wins)
+## Case handling (sort by length, first claim wins)
 
-A single pass with a token-occupancy set. Each entity is accepted or rejected outright; nothing is merged, split, or re-scored. The decision is made purely on span geometry, and it is made *after* linking — so the expensive disambiguation may have run on entities that were then discarded on length alone.
+This is a single pass that keeps track of which words are already "claimed." Each match is either kept whole or thrown out entirely — nothing is merged, split, or re-scored. The decision is based purely on the shape and length of the spans, and it happens *after* the linking step — so the expensive context-matching work in US 06 might already have run on entities that then get thrown away here for being too short.
 
 ## Later stages (deferred)
 
-- **Length is not specificity.** Ranking by character count stands in for ontological specificity; the CDB knows the concept hierarchy (US 02 extracts it), but this step does not consult it.
-- **Similarity is ignored in arbitration.** Folding `context_similarity` into the tie-break — or into the ranking itself — is the obvious improvement and is not implemented.
+- **Length isn't the same as specificity.** Ranking by character count is a stand-in for "how specific is this concept," but the CDB actually knows the real concept hierarchy (built during US 02) — this step just doesn't check it.
+- **Similarity is ignored during arbitration.** Using `context_similarity` as part of the tie-break, or the ranking itself, is an obvious improvement that hasn't been built yet.

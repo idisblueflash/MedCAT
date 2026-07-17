@@ -6,7 +6,7 @@ Stories are grouped by the stage of work they belong to — **build a model → 
 
 ## The one-paragraph version
 
-MedCAT extracts medical concepts from free clinical text and links them to an ontology (SNOMED-CT, UMLS). The core architectural insight is that **recognition and decision are separated**. A greedy dictionary matcher (US 05) deliberately *over-produces* candidate spans, each carrying every concept its name could mean; a context model (US 06) then decides which one it is, by comparing the words around the mention to a vector learned per concept. Everything else in the system exists to feed, correct, or wrap those two steps.
+MedCAT reads plain clinical text, finds medical concepts in it, and links each one to a standard medical vocabulary (like SNOMED-CT or UMLS). The main idea behind how it works is that **finding a match and deciding what it means are two separate steps**. First, a simple dictionary matcher (US 05) deliberately finds *too many* possible matches on purpose, each one carrying every concept its name could mean. Then, a context model (US 06) picks the right one, by comparing the words around the match to a vector learned for each possible concept. Everything else in MedCAT exists to feed information into these two steps, correct their mistakes, or wrap them in an easier-to-use interface.
 
 ## Building a model
 
@@ -59,12 +59,12 @@ MedCAT extracts medical concepts from free clinical text and links them to an on
 
 ## Four things worth knowing before you read
 
-These cross-cutting behaviours surface repeatedly across the stories and are the most common source of confusion when debugging a model:
+These patterns show up again and again across the stories, and they are the most common reason a model seems to behave strangely:
 
-1. **An entity can vanish at three independent gates**, and the output format (US 09) does not say which one dropped it: below `similarity_threshold` (US 06), excluded by a filter (US 08), or beaten by a longer overlapping span (US 07). Debugging a missing annotation means checking all three.
-2. **`name_status` in the source CSV is load-bearing.** A name marked `P` is used as a free training label during unsupervised training (US 10). Mark an ambiguous string `P` and the model silently learns the wrong context (US 01).
-3. **No vocab means no linker.** `CAT._create_pipeline` only adds the dictionary NER and the context linker `if self.vocab is not None`. This is both a feature — it is how DeID works (US 16) — and a trap (US 03).
-4. **The default supervised "test set" is the training set.** `test_size=0` makes `test_set = train_set = data` (US 12, US 19), so the F1 printed during training is a training-set F1.
+1. **A concept can disappear for three different reasons**, and the output (US 09) never tells you which one happened: its score was too low (`similarity_threshold`, US 06), it was blocked by a filter (US 08), or it lost to a longer overlapping match (US 07). If an annotation is missing, you have to check all three possibilities.
+2. **The `name_status` column in your source CSV matters a lot.** A name marked `P` (preferred) is used as a free training label during unsupervised training (US 10). If you mark an ambiguous word as `P` by mistake, the model will quietly learn the wrong meaning for it (US 01).
+3. **No vocabulary means no linker at all.** `CAT._create_pipeline` only adds the dictionary matcher and the context linker `if self.vocab is not None` — if there's no vocabulary, neither one gets built. This is useful on purpose for de-identification (US 16), but can be a trap if you forget it (US 03).
+4. **By default, the "test set" used in supervised training is actually the training set.** Setting `test_size=0` makes the test set and the training set literally the same data (US 12, US 19) — so the F1 score printed during training is really just how well the model fits the data it was trained on, not a measure of how it performs on new data.
 
 ## Note on the repository
 

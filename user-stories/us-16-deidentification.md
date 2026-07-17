@@ -1,31 +1,38 @@
 # US 16 De-Identification of Clinical Text
 
-As a *data engineer*, I want to *detect and redact PII/PHI in clinical free text*, so that *notes can be shared or stored more broadly without exposing patient identifiers*.
+As a *data engineer*, I want to *detect and hide personal patient information in clinical free text*, so that *notes can be shared or stored more widely without exposing who the patient is*.
 
-`DeIdModel` (`medcat/utils/ner/deid.py`) wraps a regular `CAT` pipeline configured with a PII-focused NER component, exposing a simplified API for the two cases that matter: creating a new de-identification model from an NER component (`DeIdModel.create(ner)`) and loading an existing one (`DeIdModel.load_model_pack(path)`). `deid.deid_text(text)` returns anonymised text directly, while `deid(text)` returns the full spaCy `Doc` for callers that need structured spans.
+("PII" means personally identifiable information — like a name or ID number. "PHI" means protected health information — the healthcare version of the same idea. "De-identification" or "redaction" means finding and removing or masking this information.)
 
-The wrapper exists to collapse what would otherwise be manual pipeline assembly (`CAT(cdb=ner.cdb, addl_ner=ner)` plus a separate `deid_text(cat, text)` helper) into one coherent object, while still exposing the underlying `config` and `cdb` for inspection. This keeps de-identification from requiring users to learn CAT's general-purpose construction API just to redact a document.
+`DeIdModel` (`medcat/utils/ner/deid.py`) wraps a regular `CAT` pipeline (US 05–09), set up with a component specifically trained to detect personal information, and gives you a simple way to use it for the two things you'll actually need:
+
+- Build a new de-identification model from a detection component: `DeIdModel.create(ner)`
+- Load an existing, already-built one: `DeIdModel.load_model_pack(path)`
+
+Once you have a model, `deid.deid_text(text)` gives you back the anonymised text directly. If you need more detail — the exact spans that were found and labelled — `deid(text)` gives you the full spaCy `Doc` object instead.
+
+The point of this wrapper is to save you from manually assembling a pipeline yourself (which would otherwise mean writing something like `CAT(cdb=ner.cdb, addl_ner=ner)` plus a separate helper function). Instead, you get one simple object that still lets you inspect the underlying `config` and `cdb` if you need to. This means you don't have to learn MedCAT's general pipeline-building API just to redact a document.
 
 ## Acceptance Criteria
 
-1. Given a PII-focused NER component
+1. Given a detection component trained to find personal information
    - when `DeIdModel.create(ner)` is called
      - then a working de-identification model is built from it
-2. Given a previously packaged de-identification model pack
+2. Given an already-packaged de-identification model
    - when `DeIdModel.load_model_pack(path)` is called
-     - then the model loads ready for use
+     - then the model loads and is ready to use
 3. Given a clinical document
    - when `deid_text(text)` runs
-     - then anonymised text is returned, suitable for direct storage or sharing
-4. Given a caller needs structured output
+     - then anonymised text comes back, ready to store or share directly
+4. Given a caller needs the detailed, structured output instead of just plain text
    - when `deid(text)` runs
-     - then a spaCy `Doc` with entity spans and labels is returned for downstream processing
+     - then a spaCy `Doc` with entity spans and labels is returned for further processing
 
-## Case handling (model detection + regex redaction)
+## Case handling (model detection plus pattern-based redaction)
 
-Detection builds on the transformer-based NER component (`medcat/ner/transformers_ner.py`); the module also imports `re` to support regex-based redaction patterns alongside model-based detection, so structured identifiers can be caught even where the model is uncertain. Redaction has two output modes — replaced text vs. structured `Doc` — selected by which method the caller invokes.
+Detection is built on the transformer-based recogniser from US 15 (`medcat/ner/transformers_ner.py`). The module also uses regular expressions (`re`) for pattern-based redaction, so structured identifiers (like ID numbers with a known format) can still be caught even in cases where the model itself is unsure. There are two output styles — plain redacted text, or a structured `Doc` — and you choose between them just by which method you call.
 
 ## Later stages (deferred)
 
-- **Recall auditing.** There is no built-in leakage/recall report; a held-out PHI evaluation harness would quantify residual risk before release.
-- **Configurable redaction tokens.** Replacement formatting is fixed by the helper; per-entity-type placeholders (e.g. `[NAME]`, `[DATE]`) would aid readability of redacted output.
+- **No built-in leakage check.** There's currently no automatic report measuring how much personal information might slip through undetected; a held-out test specifically for this would help quantify the remaining risk before using this in production.
+- **Redaction placeholders aren't customizable.** The text used to replace hidden information is currently fixed. Type-specific placeholders (like `[NAME]` or `[DATE]`) would make redacted text easier to read.

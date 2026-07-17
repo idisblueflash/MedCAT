@@ -1,37 +1,39 @@
 # US 22 Fitting a Very Large Concept Database into Memory
 
-As a *deployment engineer running a full UMLS model*, I want to *load a four-million-concept CDB without exhausting RAM*, so that *the model runs on the hardware I actually have rather than requiring a machine sized for its most wasteful representation*.
+As a *deployment engineer running a full UMLS model*, I want to *load a CDB with four million concepts without running out of memory (RAM)*, so that *the model runs on the hardware I actually have, instead of needing a machine sized for its least efficient possible storage layout*.
 
-The CDB is a pile of parallel dictionaries all keyed by the same things: `cui2names`, `cui2snames`, `cui2context_vectors`, `cui2count_train`, `cui2tags`, `cui2type_ids`, `cui2preferred_name`, `cui2average_confidence` — eight dicts, each storing its own copy of every CUI string as a key. At four million concepts, the keys cost more than the values. `perform_optimisation` (`medcat/utils/memory_optimiser.py:241`) collapses them: one `cui2many` dict maps each CUI to a list of indices, and each former dict becomes a `DelegatingDict` (`medcat/utils/memory_optimiser.py:67`) that looks up the index and reads the value out of a shared array. The CUI strings are stored once. The same trick applies to the name-keyed dicts (`name2many`) and to `snames`.
+A CDB is really a collection of separate lookup tables (Python dictionaries), all keyed by the same concept codes (CUIs): `cui2names`, `cui2snames`, `cui2context_vectors`, `cui2count_train`, `cui2tags`, `cui2type_ids`, `cui2preferred_name`, `cui2average_confidence` — eight dictionaries in total. Every one of them stores its own separate copy of every CUI string as a key. With four million concepts, storing the same keys eight times over ends up costing more memory than the actual data.
 
-The risk is that the optimised CDB is a *different object graph* wearing the same interface. `DelegatingDict` quacks like a dict, which is what makes this transparent — and means the optimisation is invisible at the call sites that depend on it. `CDB._memory_optimised_parts` records which parts are optimised, and `attempt_fix_after_load` (`:195`) exists precisely because loading an optimised CDB needs repair steps a normal load does not. `unoptimise_cdb` (`:338`) reverses it. Code that reaches into the CDB's dicts and mutates them directly — as training does — must work correctly against both representations, and only the tests guarantee it does.
+`perform_optimisation` (`medcat/utils/memory_optimiser.py:241`) fixes this by collapsing all eight dictionaries into one. It creates a single `cui2many` dictionary that maps each CUI to a list of index numbers, and turns each of the old dictionaries into a `DelegatingDict` (`medcat/utils/memory_optimiser.py:67`) — an object that looks up the right index and reads the actual value from one shared array. The CUI strings themselves are now stored only once. The same trick is used for name-keyed dictionaries (`name2many`) and for `snames`.
+
+There's a catch worth knowing: after this optimisation, the CDB is really a *different* internal structure wearing the same outward appearance. `DelegatingDict` behaves just like a normal dictionary from the outside — which is exactly what makes this change invisible to the rest of the codebase. `CDB._memory_optimised_parts` keeps track of which parts have been optimised, and `attempt_fix_after_load` (`:195`) exists because loading an optimised CDB back from disk needs some extra repair steps a normal load doesn't. `unoptimise_cdb` (`:338`) can undo the whole thing. Any code that reaches directly into the CDB's dictionaries and changes them — like training does — has to work correctly whether the CDB is optimised or not, and only the test suite actually guarantees that it does.
 
 ## Acceptance Criteria
 
-1. Given a large CDB and `perform_optimisation(cdb)`
+1. Given a large CDB and a call to `perform_optimisation(cdb)`
    - when it runs
-     - then the CUI-keyed dicts are replaced by `DelegatingDict`s over a shared `cui2many` index, and each CUI string is stored once rather than eight times
-2. Given `optimise_cuis` / `optimise_names` / `optimise_snames` flags
+     - then the CUI-keyed dictionaries are replaced with `DelegatingDict`s built on a shared `cui2many` index, so each CUI string is stored only once instead of eight times
+2. Given the `optimise_cuis` / `optimise_names` / `optimise_snames` settings
    - when optimisation runs
-     - then each group can be optimised independently, and `_memory_optimised_parts` records which were
+     - then each group can be optimised on its own, and `_memory_optimised_parts` keeps a record of which ones were
 3. Given an optimised CDB
-   - when annotation or training reads `cdb.cui2names[cui]`
-     - then it still works — the same dict interface is presented, so calling code is unchanged
-4. Given an optimised CDB is saved and reloaded
+   - when annotation or training code reads `cdb.cui2names[cui]`
+     - then it still works exactly as before — the same dictionary-like interface is presented, so nothing calling it needs to change
+4. Given an optimised CDB is saved and then reloaded
    - when it is loaded
-     - then `attempt_fix_after_load` must run to restore the delegation structure; without it the reloaded CDB is malformed
-5. Given `unoptimise_cdb(cdb)`
+     - then `attempt_fix_after_load` must run to rebuild the internal delegation structure — without it, the reloaded CDB is broken
+5. Given `unoptimise_cdb(cdb)` is called
    - when it runs
-     - then the plain dicts are reconstructed and the optimisation fully reversed
-6. Given a custom encoder/decoder registered for `DelegatingDict` and `DelegatingSet`
-   - when the CDB is serialised as JSON (US 18, `cdb_format='json'`)
-     - then the optimised structures survive the round trip
+     - then the plain, original dictionaries are rebuilt and the optimisation is fully reversed
+6. Given a custom encoder/decoder is registered for `DelegatingDict` and `DelegatingSet`
+   - when the CDB is saved as JSON (see US 18, `cdb_format='json'`)
+     - then the optimised structures survive being saved and loaded again
 
-## Case handling (one index, many delegating views)
+## Case handling (one shared index, many "view" dictionaries pointing into it)
 
-Deduplicate the keys, index them once, and make every former dict a view. The interface is preserved so that nothing else in the system needs to know. That transparency is the design's strength and its exposure: an optimised CDB is correct exactly to the degree that `DelegatingDict` is a faithful dict, and that faithfulness is asserted only by tests. Coverage lives in `tests/utils/test_memory_optimiser.py`.
+The approach is: remove duplicate keys, index them once, and make every old dictionary a view into that shared index. The interface stays the same on purpose, so nothing else in the system needs to know this happened. That same transparency is both the strength of the design and its risk: an optimised CDB only behaves correctly to the extent that `DelegatingDict` behaves exactly like a real dictionary, and that's only checked by the test suite. Tests live in `tests/utils/test_memory_optimiser.py`.
 
 ## Later stages (deferred)
 
-- **Context vectors are not compressed.** The largest single memory consumer in a trained CDB is `cui2context_vectors` — four float arrays per trained concept — and this optimisation dedupes only its *keys*. Quantising the vectors would dwarf the saving achieved here.
-- **Optimisation is manual.** Nothing measures the CDB's footprint and decides; the caller must know to do this.
+- **Context vectors themselves aren't compressed.** The single biggest chunk of memory in a trained CDB is `cui2context_vectors` — four arrays of numbers per trained concept — and this optimisation only removes duplicate *keys*, not the vectors' size. Compressing the vectors (through quantisation) would save far more memory than this does.
+- **Optimisation has to be triggered manually.** Nothing currently measures a CDB's memory footprint and decides on its own whether to optimise it — the person using it has to know to call this.
