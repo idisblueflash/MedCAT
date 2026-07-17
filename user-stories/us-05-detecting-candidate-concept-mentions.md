@@ -1,41 +1,46 @@
 # US 05 Detecting Candidate Concept Mentions in Text
 
-As a *clinician analysing free-text notes*, I want to *find every span of text that could be a concept*, so that *the linker has candidates to disambiguate and nothing that matters is missed before the expensive step runs*.
+As a *clinician analysing free-text notes*, I want to *find every stretch of text that could be a medical concept*, so that *the linker has candidates to choose between, and nothing important is missed before the more expensive step runs*.
 
-This is the recogniser, and it is a dictionary matcher — no model, no weights, just lookups. Walking the non-skipped tokens left to right, `NER.__call__` (`medcat/ner/vocab_based_ner.py:24`) tries each token's normalised form and its lowercase form against two structures built in US 01: `name2cuis` (this is a complete name) and `snames` (this is a *prefix* of some name). A token that is a complete name is annotated immediately; a token that is merely a prefix is held open and the next token is appended — and the next — for as long as the growing string stays in `snames`. Every time the grown string is *also* a complete name, that span is annotated too. The moment the string stops being a prefix of anything, the walk breaks.
+This step is the recogniser, and it is a simple dictionary matcher — no machine-learning model, no learned weights, just lookups in a table. It reads the text left to right, skipping any token already marked `to_skip` (US 04). For each remaining token, `NER.__call__` (`medcat/ner/vocab_based_ner.py:24`) checks its normalised form and its lowercase form against two lookup tables built back in US 01:
 
-The consequence, and it is the whole design, is that this stage **over-produces on purpose**. It emits overlapping, nested candidates — "diabetes", "diabetes mellitus", and "diabetes mellitus type 2" can all be annotated from one walk — and each carries `_.link_candidates`, the full list of CUIs that name could mean. Nothing here decides: confidence is set to `-1` explicitly, a marker meaning "not computed". Resolution happens in US 06 (which CUI) and US 07 (which span wins).
+- `name2cuis` — "this exact string is a complete concept name."
+- `snames` — "this string is the *beginning* of some concept name, but maybe not the whole thing."
+
+If a token is a complete name, it's marked right away as a match. If a token is only the beginning of a longer name, MedCAT holds it open and keeps adding the next token, then the next, for as long as the growing string is still the beginning of *something* in `snames`. Every time that growing string also happens to be a complete name, it gets marked as a match too. The moment the string stops being the start of anything, MedCAT gives up and moves on.
+
+Here's the key design decision behind all of this: this step deliberately finds **too many** matches, not too few. It's fine, even expected, for matches to overlap and nest inside each other — from one pass over the text, "diabetes", "diabetes mellitus", and "diabetes mellitus type 2" can all be found as candidates. Each match is tagged with `_.link_candidates`, the complete list of concept codes (CUIs) that name could possibly mean. Nothing here decides which meaning is correct — the confidence score is deliberately set to `-1`, meaning "not decided yet." Deciding which CUI is right happens in US 06, and deciding which overlapping span wins happens in US 07.
 
 ## Acceptance Criteria
 
-1. Given a token whose normalised or lowercase form is a complete name in `name2cuis`, and the token is not a stopword
-   - when NER walks it
-     - then a `Span` is created with `_.detected_name` set and `_.link_candidates` set to *every* CUI that name maps to
-2. Given a token that is only a prefix (in `snames`, not in `name2cuis`)
-   - when the next tokens are appended one at a time
-     - then the span keeps growing while it remains in `snames`, and is emitted each time it also becomes a complete name — so longer matches are found without losing the shorter ones
-3. Given a gap of more than `ner.max_skip_tokens` (default `2`, `medcat/config.py:434`) skipped tokens between two tokens
-   - when NER walks across it
-     - then the walk breaks — a name cannot be assembled across an arbitrarily long gap
-4. Given a candidate name shorter than `ner.min_name_len` (default `3`, `medcat/config.py:432`)
-   - when NER evaluates it
-     - then it is not annotated at all
-5. Given a name at least `min_name_len` but shorter than `ner.upper_case_limit_len` (default `4`, `medcat/config.py:439`)
-   - when NER evaluates it
-     - then it is annotated only if it is a single, fully-uppercase token — which lets `MI` through while suppressing stray short lowercase strings
-6. Given `ner.check_upper_case_names` is on and the CDB recorded the name as uppercase-only
-   - when NER matches
-     - then the text tokens must also be uppercase, or the match is rejected
-7. Given `ner.try_reverse_word_order` is on and the forward assembly fails
-   - when NER retries
-     - then the reversed two-part form is tried against `snames` before giving up
+1. Given a token whose cleaned-up or lowercase form is a complete name in `name2cuis`, and it isn't a stopword
+   - when the recogniser walks through it
+     - then a match (`Span`) is created, storing the matched name and *every* CUI it could mean
+2. Given a token that's only the start of a longer name (in `snames` but not yet a full name in `name2cuis`)
+   - when the following tokens are added one at a time
+     - then the match keeps growing as long as it's still the start of something, and gets recorded every time it also becomes a full name — so both the shorter and the longer matches are kept
+3. Given a gap of more than `ner.max_skip_tokens` (2, by default — `medcat/config.py:434`) skipped tokens between two tokens
+   - when the recogniser tries to walk across that gap
+     - then it stops — a name cannot be built by jumping across an arbitrarily wide gap
+4. Given a candidate name shorter than `ner.min_name_len` (3 letters by default — `medcat/config.py:432`)
+   - when the recogniser checks it
+     - then it isn't recorded as a match at all — it's too short to be reliable
+5. Given a name that is at least `min_name_len` but shorter than `ner.upper_case_limit_len` (4 letters by default — `medcat/config.py:439`)
+   - when the recogniser checks it
+     - then it's only accepted if it's a single word written fully in capital letters — this lets abbreviations like `MI` through while blocking random short lowercase strings
+6. Given `ner.check_upper_case_names` is turned on, and the CDB recorded that name as capital-letters-only
+   - when the recogniser tries to match it
+     - then the text must also be in capital letters, or the match is rejected
+7. Given `ner.try_reverse_word_order` is turned on, and building the name forwards fails
+   - when the recogniser retries
+     - then it tries the two words in reversed order against `snames` before giving up entirely
 
-## Case handling (greedy prefix walk, deliberate over-production)
+## Case handling (a growing string is always in one of three states)
 
-The matcher classifies each growing string into one of three states — complete name, prefix-only, neither — and dispatches: annotate, keep growing, break. It never chooses between overlapping matches and never scores anything; every ambiguity it finds it forwards. That is what makes the later stages tractable: by the time the context model runs (US 06), the candidate set is already closed.
+At every step, the growing string is either a complete name, only the start of a name, or neither. The recogniser reacts accordingly: record a match, keep growing, or stop. It never picks a winner among overlapping matches, and it never scores anything — every bit of ambiguity it finds gets passed forward. This is exactly what makes the later steps manageable: by the time the context model runs (US 06), the full list of candidates is already fixed.
 
 ## Later stages (deferred)
 
-- **No fuzzy matching.** A name is matched or it is not; the only tolerance is whatever US 04's spell-checker bought upstream.
-- **`try_reverse_word_order` is a two-term hack.** It handles `pain abdominal` → `abdominal pain`; it does not generalise to longer permutations.
-- **Normalised vs. lowercase preference is unresolved.** Source `TODO`s ask whether the normalised or the lowercase hit should win when both match; currently the normalised one does, by list order.
+- **No fuzzy matching here.** A name either matches exactly or it doesn't; the only tolerance for typos comes from the spell-checker upstream in US 04.
+- **`try_reverse_word_order` only handles two-word swaps.** It fixes cases like `pain abdominal` → `abdominal pain`, but doesn't extend to longer reorderings.
+- **Normalised vs. lowercase priority is still an open question.** Comments in the source code (`TODO`s) ask which one should win when both match the same text; right now the normalised form wins, simply because of list order.

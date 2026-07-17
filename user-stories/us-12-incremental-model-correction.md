@@ -1,31 +1,35 @@
 # US 12 Incrementally Correcting a Live Model
 
-As a *clinical curator*, I want to *fix a specific known mistake in a running model*, so that *a missing name, wrong link, or ungrouped concept is corrected immediately without a full retraining pass*.
+As a *clinical curator*, I want to *fix one specific, known mistake in a model that's already running*, so that *a missing name, a wrong link, or an ungrouped concept gets corrected right away, without a full retraining pass*.
 
-`CAT.add_cui_to_group(cui, group_name)` (`medcat/cat.py:676`), `CAT.unlink_concept_name(cui, name, ...)` (`medcat/cat.py:693`), and `CAT.add_and_train_concept(cui, name, ...)` (`medcat/cat.py:730`) apply a single targeted correction directly to the loaded model, effective on the very next `get_entities` call, with no reload or rebuild.
+Three methods let you make a small, targeted fix directly on a loaded model, and the fix takes effect the very next time you call `get_entities` — no reload, no rebuild:
 
-The key safety property: `unlink_concept_name` does not delete the CUI — it removes only the name-to-CUI link, so the name is never again linked to that CUI while the concept and its other names stay intact. A wrong *name* mapping is a much narrower and more common mistake than a wrong *concept*, and the API is deliberately scoped to fix the former without collateral damage to the latter.
+- `CAT.add_cui_to_group(cui, group_name)` (`medcat/cat.py:676`)
+- `CAT.unlink_concept_name(cui, name, ...)` (`medcat/cat.py:693`)
+- `CAT.add_and_train_concept(cui, name, ...)` (`medcat/cat.py:730`)
+
+The important safety detail: `unlink_concept_name` does not delete the concept itself — it only removes the link between one specific name and that concept. So the name will never again point to that concept, but the concept and all its other names stay exactly as they were. A wrong *name-to-concept link* is a much smaller and much more common mistake than "this concept is wrong," so this tool is deliberately scoped just to fix the name-link problem, without any risk of damaging the concept itself.
 
 ## Acceptance Criteria
 
-1. Given a name that should link to a CUI
+1. Given a name that should be linked to a concept
    - when `add_and_train_concept` is called
-     - then the name's context vector is trained immediately, optionally from a real spaCy doc/span rather than a synthetic one
-2. Given a name is wrongly linked to a CUI
+     - then that name's context vector is trained right away — optionally using a real sentence you provide, instead of a made-up one
+2. Given a name is wrongly linked to a concept
    - when `unlink_concept_name` is called
-     - then future detection of that name for that CUI stops, while the CUI and its other names remain
+     - then that name will never again be detected as meaning that concept, while the concept itself and its other names are untouched
 3. Given several related concepts
-   - when `add_cui_to_group` groups them (stored in `cdb.addl_info['cui2group']`)
-     - then they can be filtered or reported on together
-4. Given any of these corrections is applied
+   - when `add_cui_to_group` groups them together (stored in `cdb.addl_info['cui2group']`)
+     - then they can later be filtered or reported on as one group
+4. Given any of these three fixes has been applied
    - when the next annotation call runs
-     - then the change is visible without a model-pack reload
+     - then the change is already visible — there's no need to reload the model pack
 
-## Case handling (targeted CDB edits)
+## Case handling (small, direct edits to the CDB)
 
-Each operation mutates a narrow slice of CDB state — a name link, a trained vector, or a group membership — and takes effect on the next call. Live edits are captured through `medcat/utils/cdb_state.py` (`captured_state_cdb`), so a modified CDB can be checkpointed or rolled back the same way a training run can.
+Each of these operations only changes one narrow piece of the CDB — one name link, one trained vector, or one group membership — and the change applies from the very next call onward. Live edits like these are tracked through `medcat/utils/cdb_state.py` (`captured_state_cdb`), so a changed CDB can be saved as a checkpoint or rolled back, the same way a training run can be.
 
 ## Later stages (deferred)
 
-- **Edit audit trail.** Corrections mutate state in place; a recorded log of who changed what would aid review and reproducibility.
-- **Bulk correction.** The API is per-concept; a batch interface would scale curated fix-lists without scripting one call each.
+- **No audit trail for edits.** These corrections change the model's state directly, in place. A recorded log of who changed what, and when, would make review and reproducing results easier.
+- **No bulk-correction tool.** Right now each fix has to be applied one concept at a time. A batch version would make it easier to apply a long list of curated fixes without writing a separate call for each one.

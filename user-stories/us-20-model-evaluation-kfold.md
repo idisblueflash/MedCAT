@@ -1,31 +1,33 @@
 # US 20 Model Evaluation via K-Fold Cross-Validation
 
-As an *ML engineer*, I want to *measure per-concept precision/recall/F1 with cross-validation*, so that *I get a variance-aware quality estimate from a trainer export without holding out a separate test set*.
+As an *ML engineer*, I want to *measure per-concept precision, recall, and F1 using cross-validation*, so that *I get a quality estimate that also shows how much the numbers vary, without needing to hold out a separate test set*.
 
-`get_k_fold_stats(cat, mct_export_data, k=3, ...)` (`medcat/stats/kfold.py`) splits a MedCATtrainer export into `k` folds, evaluates the model against each, and aggregates per-CUI metrics (`PerCUIMetrics`) across folds via `get_metrics_mean` — giving a spread-aware estimate rather than a single-split snapshot.
+("K-fold cross-validation" is a way to test a model fairly using all your data: you split the data into `k` roughly equal parts, called "folds," and repeatedly test on one fold while using the model as-is. It gives you several scores instead of just one, so you can see how much the score varies, not just its average.)
 
-Fold creation is pluggable rather than fixed: `SimpleFoldCreator`, `PerDocsFoldCreator`, `PerAnnsFoldCreator`, and `WeightedDocumentsCreator` split by different units (raw examples, whole documents, individual annotations, document weight). Clinical exports are frequently skewed — a handful of long documents can hold most annotations for a rare CUI — so a naive random split could strand all of a rare concept's examples in one fold.
+`get_k_fold_stats(cat, mct_export_data, k=3, ...)` (`medcat/stats/kfold.py`) splits a MedCATtrainer export into `k` folds, evaluates the model against each fold, and combines the per-concept metrics (`PerCUIMetrics`) across all folds using `get_metrics_mean`. This gives you an estimate that shows how much the score spreads out, not just a single snapshot number from one split.
+
+How the folds are created isn't fixed — you can choose between several strategies: `SimpleFoldCreator`, `PerDocsFoldCreator`, `PerAnnsFoldCreator`, and `WeightedDocumentsCreator`. Each one splits the data by a different unit: raw examples, whole documents, individual annotations, or documents weighted by size. This matters because clinical exports are often lopsided — a handful of very long documents might hold most of the examples for a rare concept. Splitting purely at random could accidentally leave all of that rare concept's examples in just one fold, which would badly skew the results.
 
 ## Acceptance Criteria
 
-1. Given a standard MedCATtrainer export and a chosen `k`
+1. Given a standard MedCATtrainer export and a chosen number of folds (`k`)
    - when `get_k_fold_stats` runs
-     - then it evaluates with no additional data preparation
-2. Given the k folds are evaluated
-   - when metrics are aggregated
-     - then per-CUI metrics are computed per fold and averaged, exposing both mean and spread
-3. Given annotations are distributed unevenly across documents
-   - when a `SplitType` is selected
-     - then the fold-splitting strategy can be matched to that distribution
-4. Given a k-fold run and a single-pass run
-   - when their numbers are compared
-     - then they are directly comparable, because both reuse the same stats machinery (`medcat/stats/stats.py`, `get_stats`)
+     - then it evaluates the model with no extra data preparation needed
+2. Given the `k` folds have been evaluated
+   - when the metrics are combined
+     - then per-concept metrics are computed for each fold and then averaged, showing both the average and how much it varies
+3. Given annotations are spread unevenly across documents
+   - when a fold-splitting strategy (`SplitType`) is chosen
+     - then the splitting method can be matched to that uneven distribution
+4. Given a k-fold run and a single-pass run (US 19)
+   - when their results are compared
+     - then they're directly comparable, because both reuse the exact same scoring logic (`medcat/stats/stats.py`, `get_stats`)
 
-## Case handling (pluggable split → per-fold stats → mean)
+## Case handling (choose a split method, score each fold, then average)
 
-A fold creator partitions the export by the chosen unit, each fold is scored with the shared stats path, and results are averaged across folds. Fold creators are selected via `get_fold_creator(mct_export, ...)`; per-fold metrics come from `get_per_fold_metrics` and cross-fold aggregation from `get_metrics_mean`, all in `medcat/stats/kfold.py`.
+A fold-creation method splits the export by whichever unit you chose. Each fold is then scored using the same shared scoring logic used elsewhere, and the results are averaged across all folds. Fold creators are selected through `get_fold_creator(mct_export, ...)`; per-fold metrics come from `get_per_fold_metrics`, and combining them across folds comes from `get_metrics_mean` — all found in `medcat/stats/kfold.py`.
 
 ## Later stages (deferred)
 
-- **Stratified folds.** Split strategies target the annotation unit, not label balance; per-CUI stratification would stabilise metrics for rare concepts.
-- **Confidence intervals.** Output exposes mean and spread; reporting explicit CIs would make cross-model comparison more rigorous.
+- **No stratified folds by concept.** The current split strategies balance by document or annotation count, not by how many examples of each specific concept end up in each fold. Splitting to balance rare concepts specifically would make their scores more stable.
+- **No confidence intervals.** The output currently gives an average and a spread, but not a formal confidence interval — adding one would make comparing different models more rigorous.

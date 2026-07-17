@@ -1,44 +1,51 @@
 # US 06 Disambiguating an Ambiguous Mention Using Its Context
 
-As a *clinician analysing free-text notes*, I want to *have "cold" resolved to the infection or the temperature sensation depending on the surrounding words*, so that *the annotation means something rather than being an arbitrary pick from a list of homonyms*.
+As a *clinician analysing free-text notes*, I want to *have "cold" resolved to the infection or the temperature feeling, depending on the words around it*, so that *the annotation actually means something, instead of an arbitrary pick from a list of same-spelled meanings*.
 
-US 05 hands over spans carrying a list of candidate CUIs; this is the step that picks one — or rejects all of them. `ContextModel` (`medcat/linking/vector_context_model.py:15`) builds a vector for the mention's surroundings: for each of four context widths (`short` 3 tokens, `medium` 9, `long` 18, `xlong` 27) it collects the non-skipped, non-stopword, non-digit, non-punctuation tokens to the left and right, looks up each one's embedding in the `Vocab` (US 03), and averages them — with left/right tokens *distance-weighted* so nearer words count for more. That is compared by cosine similarity (`_similarity`, `:112`) against each candidate CUI's learned context vector (US 10, US 11), and the four widths are recombined by `linking.context_vector_weights` (`medcat/config.py:540`; long and medium dominate at `0.4` each). Highest score wins.
+US 05 hands over text spans, each carrying a list of possible concept codes (CUIs). This step is where MedCAT picks one — or decides none of them fit.
 
-The risk is that a *high* score and a *trustworthy* score are not the same thing. `_similarity` returns `-1` — not zero, not `None` — for any CUI whose `cui2count_train` is below `linking.train_count_threshold` (`medcat/config.py:553`), so an untrained concept can never win but also never explains why it lost. And two thumbs are put on the scale before the argmax: `prefer_primary_name` (`0.35`, `:568`) inflates a candidate whose name is its primary form, and `prefer_frequent_concepts` (`0.35`, `:570`) inflates candidates by the log of their training count. Both are capped at `0.99`, and both mean the winner is not simply the best contextual match — it is the best contextual match after a popularity adjustment.
+`ContextModel` (`medcat/linking/vector_context_model.py:15`) builds a vector (a list of numbers) describing the words around the mention. It looks at four window sizes at once — `short` (3 tokens), `medium` (9), `long` (18), `xlong` (27) — and for each one, it collects the nearby words (skipping stopwords, digits, and punctuation), looks up each word's embedding in the `Vocab` (US 03), and averages them. Closer words count more than farther ones (this is called "distance-weighting"). This average is then compared, using something called cosine similarity (`_similarity`, `:112`), against a vector learned separately for each candidate concept (see US 10 and US 11). The four window sizes are then combined using weights from `linking.context_vector_weights` (`medcat/config.py:540` — the `long` and `medium` windows count the most, 0.4 each). Whichever candidate scores highest wins.
+
+Here's the catch: a *high* score is not the same thing as a *trustworthy* score. If a candidate concept hasn't been seen enough times during training — fewer than `linking.train_count_threshold` (`medcat/config.py:553`) — its similarity score is forced to `-1`. That's not zero, and it's not "no answer": it means this candidate can never win, but the system doesn't say why. On top of that, two extra "thumbs on the scale" are applied before picking the winner:
+
+- `prefer_primary_name` (weight `0.35`, `:568`) gives a boost to a candidate whose matched name is its main/preferred name.
+- `prefer_frequent_concepts` (weight `0.35`, `:570`) gives a boost based on how often that concept was seen in training.
+
+Both boosts are capped at `0.99`. In short: the winner isn't simply "the best match for this context" — it's "the best match for this context, adjusted for popularity."
 
 ## Acceptance Criteria
 
-1. Given a mention with more than one candidate CUI
-   - when the linker runs outside training mode
-     - then disambiguation is forced, similarity is computed per candidate, and the argmax wins
-2. Given a mention with exactly one candidate CUI whose `(name, cui)` status is `N` or `PD`
+1. Given a mention with more than one possible CUI
+   - when the linker runs (outside of training mode)
+     - then a decision is always forced: MedCAT scores every candidate and picks the highest
+2. Given a mention with only one possible CUI, but that name is flagged `N` (not preferred) or `PD` (needs a decision)
    - when the linker runs
-     - then disambiguation is still forced — a single candidate is not a free pass if the CDB flagged that name as needing a decision
-3. Given a detected name shorter than `linking.disamb_length_limit` (default `3`, `medcat/config.py:549`)
+     - then a decision is still forced — having just one candidate doesn't skip the check if the CDB flagged that name as uncertain
+3. Given a detected name shorter than `linking.disamb_length_limit` (3 letters by default — `medcat/config.py:549`)
    - when the linker runs
-     - then disambiguation is forced regardless of candidate count — short names are never trusted on their own
-4. Given a single candidate with status `P` or `A` and a name at or above the length limit
+     - then a decision is forced no matter how many candidates there are — short names are never trusted blindly
+4. Given a single candidate flagged `P` (preferred) or `A` (automatic), with a name at or above the length limit
    - when the linker runs
-     - then it is linked directly with similarity `1` and no vector is computed (unless `always_calculate_similarity` is set, `:556`)
-5. Given a winning CUI whose similarity is below `linking.similarity_threshold` (default `0.25`, `:563`)
-   - when the threshold is applied
-     - then the entity is dropped — it is not annotated with low confidence, it is not annotated at all
-6. Given `linking.similarity_threshold_type` is `dynamic` (`:562`)
-   - when the threshold is applied
-     - then the bar is `cui2average_confidence[cui] * similarity_threshold` — a per-concept threshold learned during training, so concepts that are inherently hard to match are not held to the same absolute bar
-7. Given a winning CUI excluded by the active filters (US 08)
+     - then it's linked directly, with similarity automatically set to `1` and no vector computed (unless the setting `always_calculate_similarity` says otherwise — `:556`)
+5. Given the winning CUI's similarity score is below `linking.similarity_threshold` (0.25 by default — `:563`)
+   - when the threshold check runs
+     - then the entity is dropped entirely — it is not kept with low confidence, it's simply not annotated
+6. Given `linking.similarity_threshold_type` is set to `dynamic` (`:562`)
+   - when the threshold check runs
+     - then the bar becomes `cui2average_confidence[cui] * similarity_threshold` — a threshold learned separately for each concept, so concepts that are naturally harder to match aren't held to the same fixed bar as easy ones
+7. Given the winning CUI is excluded by an active filter (US 08)
    - when the filter is applied
-     - then it is dropped, even if it scored highest
-8. Given a candidate CUI with fewer than `train_count_threshold` training examples
-   - when similarity is computed
-     - then its similarity is `-1` and it cannot win
+     - then it is dropped, even though it scored the highest
+8. Given a candidate CUI has fewer training examples than `train_count_threshold`
+   - when its similarity is computed
+     - then the score is `-1`, and it can never win
 
-## Case handling (decide-whether-to-decide, then score)
+## Case handling (first decide if a decision is needed, then score)
 
-The linker first classifies whether a decision is even needed — short name? multiple candidates? flagged `N`/`PD`? — and only pays for vectorisation when the answer is yes. Everything that survives scoring must then clear a threshold and a filter: three independent gates, any of which drops the entity silently. An entity that "disappeared" could have failed at any one of them, and the output format (US 09) does not say which.
+The linker first checks whether a decision is even necessary — is the name too short? are there multiple candidates? is it flagged `N` or `PD`? Only if the answer is yes does it bother computing vectors. Anything that gets past that stage must then clear both a similarity threshold and a filter — three separate checkpoints, and failing any one of them silently drops the entity. If an entity you expected seems to have "vanished," it could have failed at any of these three points, and the output (US 09) won't tell you which one.
 
 ## Later stages (deferred)
 
-- **`filter_before_disamb`.** When set, candidates are filtered *before* the argmax rather than after — which changes results, not just performance (US 08).
-- **The preference bonuses are untuned constants.** `prefer_primary_name` and `prefer_frequent_concepts` both default to `0.35` with no stated derivation, and both directly move the argmax.
-- **Cold-start.** A concept with no training has no vector and cannot be linked by context; it can only be reached via the direct-link path (AC4) — exactly the path that skips the check.
+- **`filter_before_disamb`.** When this is turned on, filtering happens *before* picking the winner instead of after — which can change the actual result, not just the speed (see US 08).
+- **The popularity boosts are unproven constants.** `prefer_primary_name` and `prefer_frequent_concepts` both default to `0.35` with no documented reasoning behind that number, and both directly affect which candidate wins.
+- **Cold start problem.** A concept with no training examples has no context vector and can't be matched by context at all — the only way to link it is the direct-link shortcut (see AC4), which happens to be the one path that skips this whole check.

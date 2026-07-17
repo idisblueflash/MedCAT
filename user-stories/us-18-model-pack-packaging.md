@@ -1,31 +1,31 @@
 # US 18 Packaging and Loading Portable Model Packs
 
-As an *MLOps engineer*, I want to *bundle a configured pipeline into one portable archive and reload it elsewhere*, so that *a model built on one machine deploys identically on another*.
+As an *MLOps engineer*, I want to *bundle a fully configured pipeline into one portable file and reload it somewhere else*, so that *a model built on one machine works exactly the same way when deployed on another*.
 
-`CAT.create_model_pack(save_dir_path, ...)` (`medcat/cat.py:235`) bundles every component of the running pipeline — CDB, vocabulary, config, and any attached MetaCAT/RelCAT/NER models — into a single versioned `.zip`. `CAT.load_model_pack(zip_path, ...)` (`medcat/cat.py:365`) reconstructs an equivalent pipeline from that archive, with independent flags to skip MetaCAT models (`load_meta_models`), additional NER (`load_addl_ner`), or RelCAT models (`load_rel_models`) when only core NER+L is needed.
+`CAT.create_model_pack(save_dir_path, ...)` (`medcat/cat.py:235`) packs every piece of a running pipeline — the CDB, the vocabulary, the configuration, and any attached MetaCAT, RelCAT, or extra NER models (US 13–15) — into one single `.zip` file, with a version number attached. `CAT.load_model_pack(zip_path, ...)` (`medcat/cat.py:365`) rebuilds an equivalent pipeline from that archive. If you only need the core recognition-and-linking part, you can skip loading the extras individually with separate flags: `load_meta_models` (skip MetaCAT), `load_addl_ner` (skip extra NER models), `load_rel_models` (skip RelCAT).
 
-`force_rehash` and `change_description` tie a content hash and a human-readable note to each pack, so a model's provenance and version identity travel with the artifact itself rather than depending on filename conventions or external changelogs that drift out of sync with the file.
+Two more settings, `force_rehash` and `change_description`, attach a content hash (a fingerprint of the file's contents) and a human-readable note to each pack. This means a model's history and version identity travel along with the file itself, instead of depending on filenames or a separate changelog that could drift out of sync with the actual file.
 
 ## Acceptance Criteria
 
 1. Given a model pack created on one machine
-   - when it is loaded on another
-     - then it reproduces identical entity-extraction behaviour
-2. Given a caller needs only core NER+L
-   - when selective loading flags are set
-     - then MetaCAT / RelCAT / additional-NER weights are skipped, keeping the load fast and light
-3. Given configuration must change at deploy time
-   - when `medcat_config_dict` / `meta_cat_config_dict` / `ner_config_dict` are passed at load
-     - then config is overridden without modifying the archive
-4. Given a model pack is created
-   - when `cdb_format` is set (default `dill`)
-     - then the CDB serialization format inside the pack is explicit and controllable
+   - when it is loaded on a different machine
+     - then it produces identical entity-extraction behaviour
+2. Given a caller only needs the core recognition-and-linking parts
+   - when the selective-loading flags are set
+     - then MetaCAT, RelCAT, and extra-NER weights are skipped, keeping the load fast and light
+3. Given some configuration needs to change at deployment time
+   - when `medcat_config_dict` / `meta_cat_config_dict` / `ner_config_dict` are passed in while loading
+     - then those settings are overridden without needing to modify the archive itself
+4. Given a model pack is being created
+   - when `cdb_format` is set (`dill` by default)
+     - then the CDB's storage format inside the pack is explicit and can be changed
 
-## Case handling (bundle / rehash / selective load)
+## Case handling (pack everything, fingerprint it, then load selectively)
 
-Creation snapshots every component plus environment metadata and stamps a content hash; loading reverses this, honouring the selective-load flags and any config overrides. Packaging and versioning logic lives in `medcat/utils/saving/` (`serializer.py`, `converter.py`, `envsnapshot.py`).
+Creating a pack takes a snapshot of every component plus some environment details, and stamps it with a content hash. Loading does the reverse, respecting the selective-loading flags and any config overrides you pass in. The packaging and versioning logic lives in `medcat/utils/saving/` (`serializer.py`, `converter.py`, `envsnapshot.py`).
 
 ## Later stages (deferred)
 
-- **Signature/verification.** Packs carry a content hash but no cryptographic signature; signing would let consumers verify provenance, not just detect drift.
-- **Backward-compat matrix.** Cross-version load guarantees are informal; a documented compatibility matrix would clarify which pack versions load on which library versions.
+- **No cryptographic signature.** Packs carry a content hash (which detects accidental changes) but no cryptographic signature (which would prove who actually created the file).
+- **No formal compatibility chart.** Guarantees about which pack versions load on which library versions are informal today; a documented compatibility table would make this clearer.
